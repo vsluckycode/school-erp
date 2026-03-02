@@ -121,8 +121,8 @@ type Grade = "S" | "A" | "B" | "C" | "W" | "-";
 
 interface StudentProfile { dob?:string; gender?:string; address?:string; phone?:string; parentName?:string; parentPhone?:string; bloodGroup?:string; nic?:string; }
 interface TeacherProfile { dob?:string; gender?:string; address?:string; phone?:string; qualification?:string; joinDate?:string; nic?:string; specialization?:string; }
-interface Student { id:string; name:string; rollNo:string; classId:string; photo:string; marks:Record<string,number>; password:string; profile?:StudentProfile; }
-interface Teacher { id:string; name:string; email:string; subjectIds:string[]; classIds:string[]; password:string; profile?:TeacherProfile; }
+interface Student { id:string; name:string; rollNo:string; classId:string; photo:string; marks:Record<string,number>; password:string; profile?:StudentProfile; status?:"pending"|"approved"; }
+interface Teacher { id:string; name:string; email:string; subjectIds:string[]; classIds:string[]; password:string; profile?:TeacherProfile; status?:"pending"|"approved"; }
 interface Subject { id:string; name:string; code:string; classIds:string[]; teacherId:string }
 interface Class   { id:string; name:string; section:string; teacherId:string }
 interface TimetableSlot { day:string; period:number; subjectId:string; teacherId:string }
@@ -849,22 +849,20 @@ function LoginScreen({state,db,onLogin,onRegister,onBack}:{state:AppState;db:DbO
         if(sa) onLogin({role:"support_admin",id:sa.id,name:sa.name}); else setError("Invalid credentials");
       } else if(role==="teacher"){
         const t=state.teachers.find(t=>t.email===id&&t.password===pass);
-        if(t) onLogin({role:"teacher",id:t.id,name:t.name}); else setError("Invalid email or password");
+        if(!t){ setError("Invalid email or password"); }
+        else if(t.status==="pending"){ setError("Your account is pending admin approval."); }
+        else { onLogin({role:"teacher",id:t.id,name:t.name}); }
       } else {
         const s=state.students.find(s=>s.rollNo===id&&s.password===pass);
-        if(s) onLogin({role:"student",id:s.id,name:s.name}); else setError("Invalid roll number or password");
+        if(!s){ setError("Invalid roll number or password"); }
+        else if(s.status==="pending"){ setError("Your account is pending admin approval."); }
+        else { onLogin({role:"student",id:s.id,name:s.name}); }
       }
     } finally {
       setLoad(false);
     }
   }
 
-  const hints:Record<Role,string>={
-    admin:"Username: admin  |  Password: admin123 (change in Settings → Security)",
-    support_admin:"Email: support@nexus.edu  |  Password: support123",
-    teacher:"Email: arjun@nexus.edu  |  Password: teacher123",
-    student:"Roll No: 0001  |  Password: aditya123"
-  };
   const placeholders:Record<Role,string>={admin:"Username",support_admin:"Email address",teacher:"Email address",student:"Roll Number (e.g. 0001)"};
 
   return(
@@ -918,10 +916,6 @@ function LoginScreen({state,db,onLogin,onRegister,onBack}:{state:AppState;db:DbO
             className="w-full border border-white/10 hover:border-blue-500/30 text-white/50 hover:text-blue-400 text-sm py-2.5 rounded-xl transition-all flex items-center justify-center gap-2 hover:bg-blue-500/5">
             <UserPlus size={14}/>New User? Register Here
           </button>
-          <div className="bg-white/3 border border-white/5 rounded-xl p-3">
-            <div className="text-xs text-white/20 mb-1">Demo credentials:</div>
-            <div className="text-xs text-white/40">{hints[role]}</div>
-          </div>
         </div>
         {/* Blog link */}
         {onBack&&(
@@ -1067,6 +1061,13 @@ function Layout({user,state,children,navItems,activeTab,setTab,onLogout}:
             >
               <Menu size={18}/>
             </button>
+            {/* School logo — mobile only, shows when sidebar is hidden */}
+            <div className="md:hidden flex-shrink-0">
+              {state.settings.logoUrl
+                ? <img src={state.settings.logoUrl} className="w-7 h-7 rounded-lg object-cover"/>
+                : <div className="w-7 h-7 rounded-lg bg-blue-500/20 border border-blue-500/30 flex items-center justify-center"><School size={13} className="text-blue-400"/></div>
+              }
+            </div>
             <div className="min-w-0">
               <div className="text-sm font-semibold text-white capitalize truncate">{navItems.find(n=>n.id===activeTab)?.label}</div>
               <div className="text-xs text-white/30 hidden sm:block">{new Date().toLocaleDateString("en-IN",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</div>
@@ -1186,7 +1187,54 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
       case "dashboard": return(
         <div className="space-y-6">
           <h2 className="text-xl font-bold text-white">Admin Dashboard</h2>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+
+          {/* ── Pending Approvals Banner ── */}
+          {(()=>{
+            const pendingStudents=state.students.filter(s=>s.status==="pending");
+            const pendingTeachers=state.teachers.filter(t=>t.status==="pending");
+            const total=pendingStudents.length+pendingTeachers.length;
+            if(!total) return null;
+            return(
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-5">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center flex-shrink-0">
+                    <Bell size={16} className="text-amber-400"/>
+                  </div>
+                  <div>
+                    <div className="text-sm font-bold text-amber-300">Pending Approvals</div>
+                    <div className="text-xs text-amber-400/70">{total} account{total!==1?"s":""} awaiting your review</div>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  {[...pendingTeachers.map(t=>({...t,_role:"Teacher" as const})),...pendingStudents.map(s=>({...s,_role:"Student" as const}))].map(u=>(
+                    <div key={u.id} className="flex items-center gap-3 bg-[#080D18] border border-white/5 rounded-xl px-4 py-3">
+                      <img src={"photo" in u ? u.photo : `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.name}`} className="w-8 h-8 rounded-full flex-shrink-0"/>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm text-white font-medium truncate">{u.name}</div>
+                        <div className="text-xs text-white/40">{u._role} {"rollNo" in u?`· Roll ${u.rollNo}`:("email" in u?`· ${u.email}`:"")}</div>
+                      </div>
+                      <div className="flex gap-2 flex-shrink-0">
+                        <button onClick={()=>{
+                          if(u._role==="Teacher") upd(s=>({...s,teachers:s.teachers.map(t=>t.id===u.id?{...t,status:"approved" as const}:t)}));
+                          else upd(s=>({...s,students:s.students.map(st=>st.id===u.id?{...st,status:"approved" as const}:st)}));
+                        }} className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-1.5 rounded-lg transition-colors font-medium">
+                          <Check size={11}/>Approve
+                        </button>
+                        <button onClick={()=>{
+                          if(u._role==="Teacher") upd(s=>({...s,teachers:s.teachers.filter(t=>t.id!==u.id)}));
+                          else upd(s=>({...s,students:s.students.filter(st=>st.id!==u.id)}));
+                        }} className="flex items-center gap-1.5 border border-red-500/30 text-red-400 hover:bg-red-500/10 text-xs px-3 py-1.5 rounded-lg transition-colors">
+                          <X size={11}/>Reject
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {[
               {label:"Students",value:state.students.length,icon:Users,         color:"from-blue-500/20 to-blue-600/5",    border:"border-blue-500/30"},
               {label:"Teachers",value:state.teachers.length,icon:GraduationCap, color:"from-purple-500/20 to-purple-600/5",border:"border-purple-500/30"},
@@ -1270,7 +1318,7 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
             <h2 className="text-xl font-bold text-white">Subject Management</h2>
             <button onClick={()=>setPopup({type:"addSubject"})} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-2 rounded-lg transition-colors"><Plus size={14}/>Add Subject</button>
           </div>
-          <div className="bg-[#080D18] border border-white/5 rounded-xl overflow-hidden">
+          <div className="bg-[#080D18] border border-white/5 rounded-xl overflow-hidden overflow-x-auto">
             <table className="w-full">
               <thead><tr className="border-b border-white/5">{["Code","Subject","Classes","Teacher",""].map(h=><th key={h} className="text-left text-xs font-semibold text-white/40 uppercase tracking-wider px-4 py-3">{h}</th>)}</tr></thead>
               <tbody>{state.subjects.map(sub=>{
@@ -1354,7 +1402,7 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
           </div>
           {csvMsg&&<div className="flex items-center gap-2 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-2.5"><CheckCircle size={12}/><span className="flex-1">{csvMsg}</span><button onClick={()=>setCsvMsg("")} className="text-white/30 hover:text-white/60"><X size={11}/></button></div>}
           <div className="text-[10px] text-white/30 bg-white/3 border border-white/5 rounded-lg px-3 py-2">CSV columns: <span className="font-mono text-white/50">name, rollno, class, section, password, dob, gender, phone, address, parent_name, parent_phone, blood_group</span></div>
-          <div className="bg-[#080D18] border border-white/5 rounded-xl overflow-hidden">
+          <div className="bg-[#080D18] border border-white/5 rounded-xl overflow-hidden overflow-x-auto">
             <table className="w-full">
               <thead><tr className="border-b border-white/5">{["","Roll","Name","Class","Profile",""].map((h,i)=><th key={i} className="text-left text-xs font-semibold text-white/40 uppercase tracking-wider px-4 py-3">{h}</th>)}</tr></thead>
               <tbody>{state.students.map(st=>{
@@ -1396,6 +1444,7 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
                 setME({});
               }} className="flex items-center gap-2 text-xs bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 px-3 py-1.5 rounded-lg hover:bg-emerald-500/30 transition-colors"><Save size={12}/>Save All</button>
             </div>
+            <div className="overflow-x-auto">
             <table className="w-full">
               <thead><tr className="border-b border-white/5">{["Student","Roll","Current","Enter /100"].map(h=><th key={h} className="text-left text-xs font-semibold text-white/40 uppercase px-4 py-3">{h}</th>)}</tr></thead>
               <tbody>{state.students.filter(s=>s.classId===sc).map(st=>{
@@ -1410,6 +1459,7 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
                 );
               })}</tbody>
             </table>
+            </div>
           </div>
         </div>
       );
@@ -1609,7 +1659,7 @@ function TeacherView({user,state,setState,onLogout}:
               </div>
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {[
               {label:"Classes",value:myClasses.length,icon:School,color:"text-blue-400"},
               {label:"Subjects",value:mySubjects.length,icon:BookOpen,color:"text-purple-400"},
@@ -2324,7 +2374,7 @@ function FeesInner({state,setState,db}:{state:AppState;setState:(fn:(s:AppState)
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {[{label:"Total Billed",val:totalDue,color:"text-white"},{label:"Collected",val:totalCollected,color:"text-emerald-400"},{label:"Outstanding",val:totalUnpaid,color:"text-red-400"}].map(c=>(
           <div key={c.label} className="bg-[#080D18] border border-white/5 rounded-2xl px-5 py-4">
             <div className="text-white/30 text-xs uppercase tracking-wider mb-1">{c.label}</div>
@@ -2532,7 +2582,7 @@ function InventoryInner({state,setState,db}:{state:AppState;setState:(fn:(s:AppS
       )}
 
       {/* Summary */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {[
           {label:"Items in View",  val:`${viewItems.length} items`,   color:"text-white"},
           {label:"Total Units",    val:`${totalUnits.toLocaleString()}`, color:"text-amber-400"},
@@ -2750,7 +2800,7 @@ function BehaviorModule({state,setState,db}:{state:AppState;setState:(fn:(s:AppS
       </div>
 
       {/* Summary */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {[
           {label:"Commendations",val:totalPos,color:"text-emerald-400",bg:"bg-emerald-500/10 border-emerald-500/20"},
           {label:"Incidents",val:totalNeg,color:"text-red-400",bg:"bg-red-500/10 border-red-500/20"},
@@ -4213,9 +4263,9 @@ function RegistrationScreen({state,setState,onBack}:{state:AppState;setState:(fn
     if(role==="teacher"&&state.teachers.find(t=>t.email===form.email)){setError("Email already registered.");return;}
     if(role==="student"&&state.students.find(s=>s.rollNo===form.rollNo)){setError("Roll number already registered.");return;}
     if(role==="teacher"){
-      setState(s=>({...s,teachers:[...s.teachers,{id:uid(),name:form.name,email:form.email,subjectIds:[],classIds:[],password:form.password}]}));
+      setState(s=>({...s,teachers:[...s.teachers,{id:uid(),name:form.name,email:form.email,subjectIds:[],classIds:[],password:form.password,status:"pending"}]}));
     } else {
-      setState(s=>({...s,students:[...s.students,{id:uid(),name:form.name,rollNo:form.rollNo,classId:form.classId,photo:`https://api.dicebear.com/7.x/avataaars/svg?seed=${form.name}`,marks:{},password:form.password}]}));
+      setState(s=>({...s,students:[...s.students,{id:uid(),name:form.name,rollNo:form.rollNo,classId:form.classId,photo:`https://api.dicebear.com/7.x/avataaars/svg?seed=${form.name}`,marks:{},password:form.password,status:"pending"}]}));
     }
     setStep("done");
   }
@@ -4223,12 +4273,15 @@ function RegistrationScreen({state,setState,onBack}:{state:AppState;setState:(fn
   if(step==="done") return(
     <div className="min-h-screen bg-[#05080F] flex items-center justify-center p-4 font-mono">
       <div className="w-full max-w-sm text-center" style={{animation:"fadeUp 0.4s ease forwards"}}>
-        <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mx-auto mb-5"><CheckCircle size={28} className="text-emerald-400"/></div>
-        <h2 className="text-xl font-bold text-white mb-2">Registration Complete!</h2>
+        <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mx-auto mb-5"><Clock size={28} className="text-amber-400"/></div>
+        <h2 className="text-xl font-bold text-white mb-2">Registration Submitted!</h2>
         <p className="text-white/40 text-sm mb-1">{form.name} has been registered as a <span className="text-white/70">{role}</span>.</p>
-        {role==="student"&&<p className="text-white/30 text-xs mb-6">Login with Roll No: <span className="font-mono text-blue-400">{form.rollNo}</span></p>}
-        {role==="teacher"&&<p className="text-white/30 text-xs mb-6">Login with Email: <span className="font-mono text-blue-400">{form.email}</span></p>}
-        <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3 text-left mb-6"><Shield size={14} className="text-amber-400 flex-shrink-0"/><span className="text-xs text-amber-400">Note: Profile data is encrypted using XOR+base64. For production, use AES-256 (Web Crypto API).</span></div>
+        {role==="student"&&<p className="text-white/30 text-xs mb-2">Roll No: <span className="font-mono text-blue-400">{form.rollNo}</span></p>}
+        {role==="teacher"&&<p className="text-white/30 text-xs mb-2">Email: <span className="font-mono text-blue-400">{form.email}</span></p>}
+        <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3 text-left mb-6">
+          <Shield size={14} className="text-amber-400 flex-shrink-0"/>
+          <span className="text-xs text-amber-400">Your account is <strong>pending approval</strong>. An administrator must approve your account before you can log in.</span>
+        </div>
         <button onClick={onBack} className="w-full bg-blue-600 hover:bg-blue-500 text-white text-sm py-3 rounded-xl transition-colors">Back to Login</button>
       </div>
     </div>
