@@ -8,7 +8,8 @@ import {
   CheckCircle, AlertCircle, TrendingUp, Grid3X3, Download, FileText,
   Upload, UserPlus, Phone, Printer,
   Globe, Image, Newspaper, Star, Users2, MapPin, Calendar, Tag, Edit2, ExternalLink, ChevronLeft, ChevronDown, PlayCircle,
-  HeartHandshake, DollarSign, Package, KeyRound, CreditCard, Boxes, ClipboardList, AlertTriangle, Database, Wifi, WifiOff
+  HeartHandshake, DollarSign, Package, KeyRound, CreditCard, Boxes, ClipboardList, AlertTriangle, Database, Wifi, WifiOff,
+  Menu
 } from "lucide-react";
 
 // ─── Supabase Client ──────────────────────────────────────────────────────────
@@ -940,51 +941,138 @@ function LoginScreen({state,db,onLogin,onRegister,onBack}:{state:AppState;db:DbO
 // ═══════════════════════════════════════════════════════════════════════════════
 function Layout({user,state,children,navItems,activeTab,setTab,onLogout}:
   {user:LoggedInUser;state:AppState;children:React.ReactNode;navItems:{id:string;label:string;icon:any}[];activeTab:string;setTab:(t:string)=>void;onLogout:()=>void}) {
-  const [open,setOpen]=useState(true);
-  const roleColors:Record<string,string>={admin:"bg-blue-500/20 text-blue-400",support_admin:"bg-cyan-500/20 text-cyan-400",teacher:"bg-purple-500/20 text-purple-400",student:"bg-emerald-500/20 text-emerald-400"};
-  return(
-    <div className="flex h-screen overflow-hidden bg-[#05080F] font-mono">
-      <aside className={`${open?"w-56":"w-16"} flex-shrink-0 bg-[#080D18] border-r border-white/5 flex flex-col transition-all duration-200`}>
+
+  // Desktop: collapsed (icon-only) vs expanded
+  const [open,setOpen]         = useState(true);
+  // Mobile: sidebar drawer open / closed
+  const [mobileOpen,setMobileOpen] = useState(false);
+
+  const roleColors:Record<string,string>={
+    admin:         "bg-blue-500/20 text-blue-400",
+    support_admin: "bg-cyan-500/20 text-cyan-400",
+    teacher:       "bg-purple-500/20 text-purple-400",
+    student:       "bg-emerald-500/20 text-emerald-400",
+  };
+
+  // Close mobile drawer when a nav item is tapped
+  function handleNavClick(id:string){
+    setTab(id);
+    setMobileOpen(false);
+  }
+
+  // Sidebar inner content — shared between desktop and mobile drawer
+  function SidebarContent({forMobile=false}:{forMobile?:boolean}){
+    const showLabels = forMobile || open; // mobile always shows labels; desktop respects `open`
+    return(
+      <>
+        {/* Logo / school name */}
         <div className="px-4 py-5 border-b border-white/5 flex items-center gap-3 min-h-[64px]">
           {state.settings.logoUrl
             ?<img src={state.settings.logoUrl} className="w-8 h-8 rounded-lg object-cover flex-shrink-0"/>
             :<div className="w-8 h-8 rounded-lg bg-blue-500/20 border border-blue-500/30 flex items-center justify-center flex-shrink-0"><School size={15} className="text-blue-400"/></div>}
-          {open&&<div className="overflow-hidden"><div className="text-xs font-bold text-white leading-tight truncate">{state.settings.name}</div><div className="text-[10px] text-white/30 truncate">{state.settings.tagline}</div></div>}
+          {showLabels&&<div className="overflow-hidden">
+            <div className="text-xs font-bold text-white leading-tight truncate">{state.settings.name}</div>
+            <div className="text-[10px] text-white/30 truncate">{state.settings.tagline}</div>
+          </div>}
+          {/* Close button — mobile only */}
+          {forMobile&&(
+            <button onClick={()=>setMobileOpen(false)} className="ml-auto text-white/30 hover:text-white/70 transition-colors p-1 rounded-lg hover:bg-white/5">
+              <X size={16}/>
+            </button>
+          )}
         </div>
-        {open&&<div className="px-3 py-3 border-b border-white/5">
-          <div className="flex items-center gap-2 bg-white/3 rounded-xl px-3 py-2">
-            <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-500/40 to-purple-500/40 flex items-center justify-center text-[10px] text-white font-bold flex-shrink-0">{user.name[0]}</div>
-            <div className="overflow-hidden flex-1"><div className="text-xs text-white truncate">{user.name}</div><span className={`text-[9px] px-1.5 py-0.5 rounded-full ${roleColors[user.role]}`}>{user.role}</span></div>
+
+        {/* User badge */}
+        {showLabels&&(
+          <div className="px-3 py-3 border-b border-white/5">
+            <div className="flex items-center gap-2 bg-white/3 rounded-xl px-3 py-2">
+              <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-500/40 to-purple-500/40 flex items-center justify-center text-[10px] text-white font-bold flex-shrink-0">{user.name[0]}</div>
+              <div className="overflow-hidden flex-1">
+                <div className="text-xs text-white truncate">{user.name}</div>
+                <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${roleColors[user.role]}`}>{user.role}</span>
+              </div>
+            </div>
           </div>
-        </div>}
+        )}
+
+        {/* Nav items */}
         <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
           {navItems.map(n=>{
             const active=activeTab===n.id;
             return(
-              <button key={n.id} onClick={()=>setTab(n.id)}
+              <button key={n.id}
+                onClick={()=>handleNavClick(n.id)}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-left ${active?"bg-blue-600/20 text-blue-300 border border-blue-500/20":"text-white/40 hover:text-white/70 hover:bg-white/5"}`}>
                 <n.icon size={15} className="flex-shrink-0"/>
-                {open&&<span className="text-xs font-medium truncate">{n.label}</span>}
+                {showLabels&&<span className="text-xs font-medium truncate">{n.label}</span>}
               </button>
             );
           })}
         </nav>
+
+        {/* Footer: sign out + desktop collapse toggle */}
         <div className="p-2 border-t border-white/5 space-y-1">
           <button onClick={onLogout} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-white/30 hover:text-red-400 hover:bg-red-500/10 transition-all">
-            <LogOut size={14} className="flex-shrink-0"/>{open&&<span className="text-xs">Sign Out</span>}
+            <LogOut size={14} className="flex-shrink-0"/>
+            {showLabels&&<span className="text-xs">Sign Out</span>}
           </button>
-          <button onClick={()=>setOpen(o=>!o)} className="w-full flex items-center justify-center p-2 text-white/20 hover:text-white/50 transition-colors rounded-lg hover:bg-white/5">
-            <ChevronRight size={14} className={`transition-transform ${open?"rotate-180":""}`}/>
-          </button>
+          {/* Desktop collapse button — hidden on mobile drawer */}
+          {!forMobile&&(
+            <button onClick={()=>setOpen(o=>!o)} className="w-full flex items-center justify-center p-2 text-white/20 hover:text-white/50 transition-colors rounded-lg hover:bg-white/5">
+              <ChevronRight size={14} className={`transition-transform ${open?"rotate-180":""}`}/>
+            </button>
+          )}
         </div>
+      </>
+    );
+  }
+
+  return(
+    <div className="flex h-screen overflow-hidden bg-[#05080F] font-mono">
+
+      {/* ── DESKTOP SIDEBAR (md and above, permanent) ── */}
+      <aside className={`hidden md:flex ${open?"w-56":"w-16"} flex-shrink-0 bg-[#080D18] border-r border-white/5 flex-col transition-all duration-200`}>
+        <SidebarContent/>
       </aside>
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="h-16 bg-[#080D18] border-b border-white/5 flex items-center justify-between px-6 flex-shrink-0">
-          <div>
-            <div className="text-sm font-semibold text-white capitalize">{navItems.find(n=>n.id===activeTab)?.label}</div>
-            <div className="text-xs text-white/30">{new Date().toLocaleDateString("en-IN",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</div>
+
+      {/* ── MOBILE SIDEBAR OVERLAY (below md) ── */}
+      {/* Backdrop */}
+      {mobileOpen&&(
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 md:hidden"
+          onClick={()=>setMobileOpen(false)}
+        />
+      )}
+      {/* Drawer */}
+      <aside className={`
+        fixed top-0 left-0 h-full w-72 z-50
+        bg-[#080D18] border-r border-white/5
+        flex flex-col
+        transition-transform duration-300 ease-in-out
+        md:hidden
+        ${mobileOpen?"translate-x-0":"-translate-x-full"}
+      `}>
+        <SidebarContent forMobile/>
+      </aside>
+
+      {/* ── MAIN CONTENT AREA ── */}
+      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+        <header className="h-16 bg-[#080D18] border-b border-white/5 flex items-center justify-between px-4 md:px-6 flex-shrink-0 gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            {/* Hamburger — mobile only */}
+            <button
+              onClick={()=>setMobileOpen(true)}
+              className="md:hidden flex-shrink-0 p-2 rounded-lg text-white/40 hover:text-white/70 hover:bg-white/5 transition-colors"
+              aria-label="Open menu"
+            >
+              <Menu size={18}/>
+            </button>
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-white capitalize truncate">{navItems.find(n=>n.id===activeTab)?.label}</div>
+              <div className="text-xs text-white/30 hidden sm:block">{new Date().toLocaleDateString("en-IN",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</div>
+            </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-shrink-0">
             {(user.role==="admin"||user.role==="support_admin")&&(
               <div className="hidden sm:flex items-center gap-1.5 text-xs text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 px-2.5 py-1 rounded-full">
                 <Shield size={11}/>PII Encrypted
@@ -993,7 +1081,7 @@ function Layout({user,state,children,navItems,activeTab,setTab,onLogout}:
             <Bell size={16} className="text-white/30 hover:text-white/60 cursor-pointer transition-colors"/>
           </div>
         </header>
-        <main className="flex-1 overflow-y-auto p-6" key={activeTab} style={{animation:"fadeUp 0.2s ease forwards"}}>
+        <main className="flex-1 overflow-y-auto p-4 md:p-6" key={activeTab} style={{animation:"fadeUp 0.2s ease forwards"}}>
           {children}
         </main>
       </div>
