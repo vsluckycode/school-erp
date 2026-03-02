@@ -4423,6 +4423,43 @@ function RegistrationScreen({state,setState,onBack}:{state:AppState;setState:(fn
 
 export default function SchoolERP() {
   const [state,setState] = useState<AppState>(INITIAL);
+  const registerNewUser = (formData: any, role: "student" | "teacher") => {
+    const id = Math.random().toString(36).slice(2, 9);
+    
+    if (role === "student") {
+      const newStudent: Student = {
+        id,
+        name: formData.name,
+        rollNo: formData.rollNo || "S-" + Math.floor(Math.random() * 1000),
+        classId: formData.classId || "c1",
+        photo: `https://api.dicebear.com/7.x/avataaars/svg?seed=${formData.name}`,
+        marks: {},
+        password: formData.password,
+        status: "pending" as const,
+      };
+      
+      setState(prev => ({ 
+        ...prev, 
+        students: [...prev.students, newStudent] 
+      }));
+    } else {
+      const newTeacher: Teacher = {
+        id,
+        name: formData.name,
+        email: formData.email,
+        password: formData.password,
+        subjectIds: [],
+        classIds: [],
+        status: "pending" as const,
+      };
+      
+      setState(prev => ({ 
+        ...prev, 
+        teachers: [...prev.teachers, newTeacher] 
+      }));
+    }
+    alert("Registration sent for Admin approval!");
+  };
   const [user,setUser]   = useState<LoggedInUser|null>(null);
   const [showReg,setReg] = useState(false);
   const [route,setRoute] = useState<string>("home"); // public site route
