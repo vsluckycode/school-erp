@@ -398,11 +398,11 @@ function gradeLabel(g:Grade){ return{A:"Excellent",B:"Good",C:"Average",S:"Simpl
 // ─── Grade Key Component (fix for cramped plain-text key shown in screenshots) ─
 function GradeKey() {
   const items = [
-    {g:"S",r:"≥ 90",cls:"bg-emerald-500/20 border-emerald-500/40 text-emerald-400"},
     {g:"A",r:"≥ 75",cls:"bg-blue-500/20 border-blue-500/40 text-blue-400"},
-    {g:"B",r:"≥ 60",cls:"bg-yellow-500/20 border-yellow-500/40 text-yellow-400"},
-    {g:"C",r:"≥ 40",cls:"bg-orange-500/20 border-orange-500/40 text-orange-400"},
-    {g:"W",r:"< 40", cls:"bg-red-500/20 border-red-500/40 text-red-400"},
+    {g:"B",r:"≥ 65",cls:"bg-yellow-500/20 border-yellow-500/40 text-yellow-400"},
+    {g:"C",r:"≥ 55",cls:"bg-orange-500/20 border-orange-500/40 text-orange-400"},
+    {g:"S",r:"≥ 35",cls:"bg-emerald-500/20 border-emerald-500/40 text-emerald-400"},
+    {g:"W",r:"< 35", cls:"bg-red-500/20 border-red-500/40 text-red-400"},
   ] as const;
   return (
     <div className="mt-5 pt-4 border-t border-white/10">
@@ -1061,13 +1061,19 @@ function Layout({user,state,children,navItems,activeTab,setTab,onLogout}:
             >
               <Menu size={18}/>
             </button>
-            {/* School logo — mobile only, shows when sidebar is hidden */}
-            <div className="md:hidden flex-shrink-0">
-              {state.settings.logoUrl
-                ? <img src={state.settings.logoUrl} className="w-7 h-7 rounded-lg object-cover"/>
-                : <div className="w-7 h-7 rounded-lg bg-blue-500/20 border border-blue-500/30 flex items-center justify-center"><School size={13} className="text-blue-400"/></div>
-              }
-            </div>
+            {/* School logo — mobile only */}
+<div className="flex md:hidden flex-shrink-0 items-center">
+  {state.settings.logoUrl
+    ? <img 
+        src={state.settings.logoUrl} 
+        className="w-8 h-8 rounded-lg object-cover block"
+        style={{display:"block"}}
+      />
+    : <div className="w-8 h-8 rounded-lg bg-blue-500/20 border border-blue-500/30 flex items-center justify-center flex-shrink-0">
+        <School size={14} className="text-blue-400"/>
+      </div>
+  }
+</div>
             <div className="min-w-0">
               <div className="text-sm font-semibold text-white capitalize truncate">{navItems.find(n=>n.id===activeTab)?.label}</div>
               <div className="text-xs text-white/30 hidden sm:block">{new Date().toLocaleDateString("en-IN",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</div>
