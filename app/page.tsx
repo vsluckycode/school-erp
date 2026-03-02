@@ -1,5 +1,5 @@
 "use client";
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   School, Users, BookOpen, QrCode, Settings, BarChart3,
   Plus, X, Check, Trash2, GraduationCap, Clock, Award,
@@ -8,8 +8,111 @@ import {
   CheckCircle, AlertCircle, TrendingUp, Grid3X3, Download, FileText,
   Upload, UserPlus, Phone, Printer,
   Globe, Image, Newspaper, Star, Users2, MapPin, Calendar, Tag, Edit2, ExternalLink, ChevronLeft, ChevronDown, PlayCircle,
-  HeartHandshake, DollarSign, Package, KeyRound, CreditCard, Boxes, ClipboardList, AlertTriangle
+  HeartHandshake, DollarSign, Package, KeyRound, CreditCard, Boxes, ClipboardList, AlertTriangle, Database, Wifi, WifiOff
 } from "lucide-react";
+
+// ─── Supabase Client ──────────────────────────────────────────────────────────
+// Replace these with your actual Supabase project URL and anon key.
+// You can find them in: Supabase Dashboard → Settings → API
+const SUPABASE_URL  = process.env.NEXT_PUBLIC_SUPABASE_URL  || "";
+const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+
+// Minimal Supabase REST client — no SDK needed, works with the anon key
+const sb = {
+  headers: () => ({
+    "Content-Type": "application/json",
+    "apikey": SUPABASE_ANON,
+    "Authorization": `Bearer ${SUPABASE_ANON}`,
+    "Prefer": "return=representation",
+  }),
+  isConfigured: () => !!(SUPABASE_URL && SUPABASE_ANON),
+
+  async select<T>(table: string, query = ""): Promise<T[]> {
+    if (!this.isConfigured()) return [];
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${query}`, {
+      headers: this.headers() as HeadersInit,
+    });
+    if (!res.ok) { console.error(`[sb.select] ${table}:`, await res.text()); return []; }
+    return res.json();
+  },
+
+  async insert<T>(table: string, data: Partial<T>): Promise<T | null> {
+    if (!this.isConfigured()) return null;
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+      method: "POST",
+      headers: this.headers() as HeadersInit,
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) { console.error(`[sb.insert] ${table}:`, await res.text()); return null; }
+    const arr = await res.json();
+    return arr[0] ?? null;
+  },
+
+  async upsert<T>(table: string, data: Partial<T>): Promise<T | null> {
+    if (!this.isConfigured()) return null;
+    const h = { ...this.headers(), "Prefer": "return=representation,resolution=merge-duplicates" } as HeadersInit;
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+      method: "POST",
+      headers: h,
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) { console.error(`[sb.upsert] ${table}:`, await res.text()); return null; }
+    const arr = await res.json();
+    return arr[0] ?? null;
+  },
+
+  async update<T>(table: string, id: string, data: Partial<T>): Promise<boolean> {
+    if (!this.isConfigured()) return false;
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`, {
+      method: "PATCH",
+      headers: this.headers() as HeadersInit,
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) { console.error(`[sb.update] ${table}:`, await res.text()); return false; }
+    return true;
+  },
+
+  async delete(table: string, id: string): Promise<boolean> {
+    if (!this.isConfigured()) return false;
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`, {
+      method: "DELETE",
+      headers: this.headers() as HeadersInit,
+    });
+    if (!res.ok) { console.error(`[sb.delete] ${table}:`, await res.text()); return false; }
+    return true;
+  },
+};
+
+// ─── DB Operations Interface (passed as prop) ─────────────────────────────────
+interface DbOps {
+  connected: boolean;
+  // Students
+  addStudent:    (s: Student)       => Promise<void>;
+  updateStudent: (s: Student)       => Promise<void>;
+  deleteStudent: (id: string)       => Promise<void>;
+  // Teachers
+  addTeacher:    (t: Teacher)       => Promise<void>;
+  updateTeacher: (t: Teacher)       => Promise<void>;
+  deleteTeacher: (id: string)       => Promise<void>;
+  // Inventory items
+  addItem:       (i: InventoryItem) => Promise<void>;
+  updateItem:    (i: InventoryItem) => Promise<void>;
+  deleteItem:    (id: string)       => Promise<void>;
+  // Labs
+  addLab:        (l: Lab)           => Promise<void>;
+  updateLab:     (l: Lab)           => Promise<void>;
+  deleteLab:     (id: string)       => Promise<void>;
+  // Fees
+  addFee:        (f: FeeRecord)     => Promise<void>;
+  updateFee:     (f: FeeRecord)     => Promise<void>;
+  deleteFee:     (id: string)       => Promise<void>;
+  // Behavior
+  addBehavior:   (b: BehaviorRecord)=> Promise<void>;
+  updateBehavior:(b: BehaviorRecord)=> Promise<void>;
+  deleteBehavior:(id: string)       => Promise<void>;
+  // Counseling
+  saveCounselingProfile: (p: CounselingProfile) => Promise<void>;
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Role  = "admin" | "support_admin" | "teacher" | "student";
@@ -706,7 +809,7 @@ function MarksheetView({state,classId,onClassChange,availableClasses}:
 // ═══════════════════════════════════════════════════════════════════════════════
 // LOGIN SCREEN
 // ═══════════════════════════════════════════════════════════════════════════════
-function LoginScreen({state,onLogin,onRegister,onBack}:{state:AppState;onLogin:(u:LoggedInUser)=>void;onRegister:()=>void;onBack?:()=>void}) {
+function LoginScreen({state,db,onLogin,onRegister,onBack}:{state:AppState;db:DbOps;onLogin:(u:LoggedInUser)=>void;onRegister:()=>void;onBack?:()=>void}) {
   const [role,setRole]   = useState<Role>("student");
   const [id,setId]       = useState("");
   const [pass,setPass]   = useState("");
@@ -714,14 +817,33 @@ function LoginScreen({state,onLogin,onRegister,onBack}:{state:AppState;onLogin:(
   const [error,setError] = useState("");
   const [load,setLoad]   = useState(false);
 
-  function handleLogin(){
+  async function handleLogin(){
     setError(""); setLoad(true);
-    setTimeout(()=>{
-      setLoad(false);
+    try {
       if(role==="admin"){
-        if(id==="admin"&&pass===state.settings.pwAdmin) onLogin({role:"admin",id:"admin",name:"Administrator"});
-        else setError("Invalid admin credentials");
+        // 1. Try Supabase users table first
+        if(sb.isConfigured()){
+          const rows = await sb.select<any>("users", `username=eq.${encodeURIComponent(id)}&role=eq.admin`);
+          if(rows.length && rows[0].password_hash === pass){
+            onLogin({role:"admin",id:"admin",name:rows[0].display_name||"Administrator"});
+            return;
+          }
+        }
+        // 2. Fallback: hardcoded master admin (username: admin, password from settings)
+        if(id==="admin" && pass===state.settings.pwAdmin){
+          onLogin({role:"admin",id:"admin",name:"Administrator"});
+        } else {
+          setError("Invalid admin credentials");
+        }
       } else if(role==="support_admin"){
+        // Try Supabase users table, then fallback to local supportAdmins
+        if(sb.isConfigured()){
+          const rows = await sb.select<any>("users", `username=eq.${encodeURIComponent(id)}&role=eq.support_admin`);
+          if(rows.length && rows[0].password_hash === pass){
+            onLogin({role:"support_admin",id:rows[0].id,name:rows[0].display_name||id});
+            return;
+          }
+        }
         const sa=state.supportAdmins.find(s=>s.email===id&&s.password===pass);
         if(sa) onLogin({role:"support_admin",id:sa.id,name:sa.name}); else setError("Invalid credentials");
       } else if(role==="teacher"){
@@ -731,7 +853,9 @@ function LoginScreen({state,onLogin,onRegister,onBack}:{state:AppState;onLogin:(
         const s=state.students.find(s=>s.rollNo===id&&s.password===pass);
         if(s) onLogin({role:"student",id:s.id,name:s.name}); else setError("Invalid roll number or password");
       }
-    },600);
+    } finally {
+      setLoad(false);
+    }
   }
 
   const hints:Record<Role,string>={
@@ -880,8 +1004,8 @@ function Layout({user,state,children,navItems,activeTab,setTab,onLogout}:
 // ═══════════════════════════════════════════════════════════════════════════════
 // ADMIN VIEW
 // ═══════════════════════════════════════════════════════════════════════════════
-function AdminView({user,state,setState,onLogout,isSA}:
-  {user:LoggedInUser;state:AppState;setState:(fn:(s:AppState)=>AppState)=>void;onLogout:()=>void;isSA?:boolean}) {
+function AdminView({user,state,setState,onLogout,isSA,db}:
+  {user:LoggedInUser;state:AppState;setState:(fn:(s:AppState)=>AppState)=>void;onLogout:()=>void;isSA?:boolean;db:DbOps}) {
 
   const [tab,setTab]           = useState("dashboard");
   const [popup,setPopup]       = useState<{type:string;data?:any}|null>(null);
@@ -930,8 +1054,9 @@ function AdminView({user,state,setState,onLogout,isSA}:
         profile:encProfile({dob:r.dob||"",gender:r.gender||"",phone:r.phone||"",address:r.address||"",parentName:r.parent_name||"",parentPhone:r.parent_phone||"",bloodGroup:r.blood_group||"",nic:""})} as Student;
     }).filter(Boolean) as Student[];
     if(!ns.length){setCsvMsg("No valid rows. Required columns: name, rollno"); return;}
-    upd(s=>({...s,students:[...s.students,...ns.filter(n=>!s.students.find(x=>x.rollNo===n.rollNo))]}));
-    setCsvMsg(`✓ Imported ${ns.length} students successfully`);
+    const newOnes=ns.filter(n=>!state.students.find(x=>x.rollNo===n.rollNo));
+    newOnes.forEach(s=>db.addStudent(s));
+    setCsvMsg(`✓ Imported ${newOnes.length} students successfully`);
   }
   function importTeachersCSV(text:string){
     const rows=parseCSV(text);
@@ -941,8 +1066,9 @@ function AdminView({user,state,setState,onLogout,isSA}:
         profile:encProfile({dob:r.dob||"",gender:r.gender||"",phone:r.phone||"",address:r.address||"",qualification:r.qualification||"",specialization:r.specialization||"",joinDate:r.join_date||r.joindate||"",nic:r.nic||""})} as Teacher;
     }).filter(Boolean) as Teacher[];
     if(!nt.length){setCsvMsg("No valid rows. Required columns: name, email"); return;}
-    upd(s=>({...s,teachers:[...s.teachers,...nt.filter(n=>!s.teachers.find(x=>x.email===n.email))]}));
-    setCsvMsg(`✓ Imported ${nt.length} teachers successfully`);
+    const newOnes=nt.filter(n=>!state.teachers.find(x=>x.email===n.email));
+    newOnes.forEach(t=>db.addTeacher(t));
+    setCsvMsg(`✓ Imported ${newOnes.length} teachers successfully`);
   }
   function importTimetableCSV(text:string){
     const rows=parseCSV(text); let count=0;
@@ -1109,7 +1235,7 @@ function AdminView({user,state,setState,onLogout,isSA}:
                     </div>
                     <div className="flex gap-1.5 ml-auto">
                       <button onClick={()=>setEditTch(t)} className="text-white/20 hover:text-blue-400 transition-colors p-1" title="Edit Profile"><User size={13}/></button>
-                      {!isSA&&<button onClick={()=>upd(s=>({...s,teachers:s.teachers.filter(x=>x.id!==t.id)}))} className="text-white/20 hover:text-red-400 transition-colors p-1"><Trash2 size={14}/></button>}
+                      {!isSA&&<button onClick={()=>db.deleteTeacher(t.id)} className="text-white/20 hover:text-red-400 transition-colors p-1"><Trash2 size={14}/></button>}
                     </div>
                   </div>
                   {ownCls.length>0&&<div className="mb-3"><span className="text-xs bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full">Class Teacher: {ownCls.map(c=>`${c.name}-${c.section}`).join(", ")}</span></div>}
@@ -1155,7 +1281,7 @@ function AdminView({user,state,setState,onLogout,isSA}:
                     <td className="px-4 py-3"><div className="flex gap-2 text-xs">{d.bloodGroup&&<span className="bg-red-500/10 text-red-400 px-1.5 py-0.5 rounded font-mono">{d.bloodGroup}</span>}{d.phone&&<span className="text-white/30 flex items-center gap-0.5"><Phone size={9}/>{d.phone}</span>}</div></td>
                     <td className="px-4 py-3"><div className="flex gap-1.5">
                       <button onClick={()=>setEditSt(st)} className="text-white/20 hover:text-blue-400 transition-colors p-1" title="Edit Profile"><User size={13}/></button>
-                      {!isSA&&<button onClick={()=>upd(s=>({...s,students:s.students.filter(x=>x.id!==st.id)}))} className="text-white/20 hover:text-red-400 transition-colors p-1"><Trash2 size={14}/></button>}
+                      {!isSA&&<button onClick={()=>db.deleteStudent(st.id)} className="text-white/20 hover:text-red-400 transition-colors p-1"><Trash2 size={14}/></button>}
                     </div></td>
                   </tr>
                 );
@@ -1316,13 +1442,13 @@ function AdminView({user,state,setState,onLogout,isSA}:
 
       case "manage_downloads": return <DownloadsManager state={state} setState={upd}/>;
 
-      case "counseling": return <CounselingModule state={state} setState={upd}/>;
+      case "counseling": return <CounselingModule state={state} setState={upd} db={db}/>;
 
-      case "behavior": return <BehaviorModule state={state} setState={upd}/>;
+      case "behavior": return <BehaviorModule state={state} setState={upd} db={db}/>;
 
-      case "fees": return <FeesModule state={state} setState={upd}/>;
+      case "fees": return <FeesModule state={state} setState={upd} db={db}/>;
 
-      case "inventory": return <InventoryModule state={state} setState={upd}/>;
+      case "inventory": return <InventoryModule state={state} setState={upd} db={db}/>;
 
       default: return null;
     }
@@ -1333,8 +1459,8 @@ function AdminView({user,state,setState,onLogout,isSA}:
     const close=()=>setPopup(null);
     if(popup.type==="addClass"){let n="",sec="",tid="";return<Modal title="Add Class" onClose={close}><Field label="Class Name" onChange={v=>n=v}/><Field label="Section" onChange={v=>sec=v}/><SelField label="Class Teacher" options={state.teachers.map(t=>({value:t.id,label:t.name}))} onChange={v=>tid=v}/><MBtn onClick={()=>{if(n&&sec){upd(s=>({...s,classes:[...s.classes,{id:uid(),name:n,section:sec,teacherId:tid}]}));close();}}}>Create</MBtn></Modal>;}
     if(popup.type==="addSubject"){let n="",code="",tid="";let cids:string[]=[];return<Modal title="Add Subject" onClose={close}><Field label="Subject Name" onChange={v=>n=v}/><Field label="Code" onChange={v=>code=v.toUpperCase()}/><SelField label="Teacher" options={state.teachers.map(t=>({value:t.id,label:t.name}))} onChange={v=>tid=v}/><div><label className="text-xs text-white/40 uppercase block mb-2">Classes</label><div className="flex gap-3 flex-wrap">{state.classes.map(c=><label key={c.id} className="flex items-center gap-1.5 text-sm text-white cursor-pointer"><input type="checkbox" className="accent-blue-500" onChange={e=>{if(e.target.checked)cids.push(c.id);else cids=cids.filter(x=>x!==c.id);}}/>{c.name}-{c.section}</label>)}</div></div><MBtn onClick={()=>{if(n&&code){upd(s=>({...s,subjects:[...s.subjects,{id:uid(),name:n,code,classIds:cids,teacherId:tid}]}));close();}}}>Create</MBtn></Modal>;}
-    if(popup.type==="addTeacher"){let n="",e="",p="";return<Modal title="Add Teacher" onClose={close}><Field label="Full Name" onChange={v=>n=v}/><Field label="Email" onChange={v=>e=v}/><Field label="Password" onChange={v=>p=v}/><MBtn onClick={()=>{if(n&&e){upd(s=>({...s,teachers:[...s.teachers,{id:uid(),name:n,email:e,subjectIds:[],classIds:[],password:p}]}));close();}}}>Add</MBtn></Modal>;}
-    if(popup.type==="addStudent"){let n="",r="",cid=state.classes[0]?.id||"",p="";return<Modal title="Add Student" onClose={close}><Field label="Full Name" onChange={v=>n=v}/><Field label="Roll Number" onChange={v=>r=v}/><Field label="Password" onChange={v=>p=v}/><SelField label="Class" options={state.classes.map(c=>({value:c.id,label:`Class ${c.name}-${c.section}`}))} onChange={v=>cid=v}/><MBtn onClick={()=>{if(n&&r){upd(s=>({...s,students:[...s.students,{id:uid(),name:n,rollNo:r,classId:cid,photo:`https://api.dicebear.com/7.x/avataaars/svg?seed=${n}`,marks:{},password:p}]}));close();}}}>Add</MBtn></Modal>;}
+    if(popup.type==="addTeacher"){let n="",e="",p="";return<Modal title="Add Teacher" onClose={close}><Field label="Full Name" onChange={v=>n=v}/><Field label="Email" onChange={v=>e=v}/><Field label="Password" onChange={v=>p=v}/><MBtn onClick={()=>{if(n&&e){const t:Teacher={id:uid(),name:n,email:e,subjectIds:[],classIds:[],password:p};db.addTeacher(t);close();}}}>Add</MBtn></Modal>;}
+    if(popup.type==="addStudent"){let n="",r="",cid=state.classes[0]?.id||"",p="";return<Modal title="Add Student" onClose={close}><Field label="Full Name" onChange={v=>n=v}/><Field label="Roll Number" onChange={v=>r=v}/><Field label="Password" onChange={v=>p=v}/><SelField label="Class" options={state.classes.map(c=>({value:c.id,label:`Class ${c.name}-${c.section}`}))} onChange={v=>cid=v}/><MBtn onClick={()=>{if(n&&r){const s:Student={id:uid(),name:n,rollNo:r,classId:cid,photo:`https://api.dicebear.com/7.x/avataaars/svg?seed=${n}`,marks:{},password:p};db.addStudent(s);close();}}}>Add</MBtn></Modal>;}
     if(popup.type==="addSlot"){const{day,period,classId}=popup.data;let sid="",tid="";const csubs=state.subjects.filter(s=>s.classIds.includes(classId));return<Modal title={`Slot — ${day}, P${period}`} onClose={close}><SelField label="Subject" options={csubs.map(s=>({value:s.id,label:s.name}))} onChange={v=>sid=v}/><SelField label="Teacher" options={state.teachers.map(t=>({value:t.id,label:t.name}))} onChange={v=>tid=v}/><MBtn onClick={()=>{if(sid){upd(s=>({...s,timetable:{...s.timetable,[classId]:[...(s.timetable[classId]||[]),{day,period,subjectId:sid,teacherId:tid}]}}));close();}}}>Add</MBtn></Modal>;}
     if(popup.type==="addSupportAdmin"){let n="",e="",p="";return<Modal title="Add Support Admin" onClose={close}><Field label="Full Name" onChange={v=>n=v}/><Field label="Email" onChange={v=>e=v}/><Field label="Password" onChange={v=>p=v}/><MBtn onClick={()=>{if(n&&e&&p){upd(s=>({...s,supportAdmins:[...s.supportAdmins,{id:uid(),name:n,email:e,password:p}]}));close();}}}>Create</MBtn></Modal>;}
     return null;
@@ -1344,8 +1470,8 @@ function AdminView({user,state,setState,onLogout,isSA}:
     <Layout user={user} state={state} navItems={NAV} activeTab={tab} setTab={setTab} onLogout={onLogout}>
       {renderTab()}
       {popup&&<div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={e=>e.target===e.currentTarget&&setPopup(null)}>{renderPopup()}</div>}
-      {editSt&&<div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"><StudentProfileModal student={editSt} state={state} onSave={u=>upd(s=>({...s,students:s.students.map(x=>x.id===u.id?u:x)}))} onClose={()=>setEditSt(null)}/></div>}
-      {editTch&&<div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"><TeacherProfileModal teacher={editTch} state={state} onSave={u=>upd(s=>({...s,teachers:s.teachers.map(x=>x.id===u.id?u:x)}))} onClose={()=>setEditTch(null)}/></div>}
+      {editSt&&<div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"><StudentProfileModal student={editSt} state={state} onSave={u=>db.updateStudent(u)} onClose={()=>setEditSt(null)}/></div>}
+      {editTch&&<div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"><TeacherProfileModal teacher={editTch} state={state} onSave={u=>db.updateTeacher(u)} onClose={()=>setEditTch(null)}/></div>}
     </Layout>
   );
 }
@@ -1878,15 +2004,15 @@ function PasswordGate({moduleId,correctPw,icon,title,subtitle,accent,children}:{
 // ═══════════════════════════════════════════════════════════════════════════════
 // COUNSELING MODULE
 // ═══════════════════════════════════════════════════════════════════════════════
-function CounselingModule({state,setState}:{state:AppState;setState:(fn:(s:AppState)=>AppState)=>void}){
+function CounselingModule({state,setState,db}:{state:AppState;setState:(fn:(s:AppState)=>AppState)=>void;db:DbOps}){
   return(
     <PasswordGate moduleId="counseling" correctPw={state.settings.pwCounselor} icon={<HeartHandshake size={28}/>} title="Counseling Module" subtitle="High-privacy student counseling records — authorized personnel only." accent="text-purple-400">
-      <CounselingInner state={state} setState={setState}/>
+      <CounselingInner state={state} setState={setState} db={db}/>
     </PasswordGate>
   );
 }
 
-function CounselingInner({state,setState}:{state:AppState;setState:(fn:(s:AppState)=>AppState)=>void}){
+function CounselingInner({state,setState,db}:{state:AppState;setState:(fn:(s:AppState)=>AppState)=>void;db:DbOps}){
   const upd=(fn:(c:CounselingState)=>CounselingState)=>setState(s=>({...s,counseling:fn(s.counseling)}));
   const [search,setSearch]=React.useState("");
   const [selId,setSelId]=React.useState<string|null>(null);
@@ -1909,14 +2035,14 @@ function CounselingInner({state,setState}:{state:AppState;setState:(fn:(s:AppSta
     const session:CounselingSession={id:uid(),date:today,...newNote};
     const prof=getOrCreateProfile(selId!);
     const updated={...prof,sessions:[session,...prof.sessions]};
-    upd(c=>({...c,profiles:c.profiles.some(p=>p.studentId===selId!)?c.profiles.map(p=>p.studentId===selId!?updated:p):[...c.profiles,updated]}));
+    db.saveCounselingProfile(updated);
     setNewNote({issue:"",notes:"",followUp:"",mood:"neutral"});
   }
 
   function saveBg(){
     const prof=getOrCreateProfile(selId!);
     const updated={...prof,background:bgText};
-    upd(c=>({...c,profiles:c.profiles.some(p=>p.studentId===selId!)?c.profiles.map(p=>p.studentId===selId!?updated:p):[...c.profiles,updated]}));
+    db.saveCounselingProfile(updated);
     setEditBg(false);
   }
 
@@ -1924,14 +2050,14 @@ function CounselingInner({state,setState}:{state:AppState;setState:(fn:(s:AppSta
     if(!newFlag.trim()) return;
     const prof=getOrCreateProfile(selId!);
     const updated={...prof,flags:[...prof.flags,newFlag.trim()]};
-    upd(c=>({...c,profiles:c.profiles.some(p=>p.studentId===selId!)?c.profiles.map(p=>p.studentId===selId!?updated:p):[...c.profiles,updated]}));
+    db.saveCounselingProfile(updated);
     setNewFlag("");
   }
 
   function removeSession(sid:string){
     const prof=getOrCreateProfile(selId!);
     const updated={...prof,sessions:prof.sessions.filter(s=>s.id!==sid)};
-    upd(c=>({...c,profiles:c.profiles.map(p=>p.studentId===selId!?updated:p)}));
+    db.saveCounselingProfile(updated);
   }
 
   const MOOD_CFG={
@@ -2008,7 +2134,7 @@ function CounselingInner({state,setState}:{state:AppState;setState:(fn:(s:AppSta
                 <div className="flex gap-2 flex-wrap mb-2">
                   {(profile?.flags||[]).map((f,i)=>(
                     <span key={i} className="flex items-center gap-1 text-xs bg-amber-500/10 border border-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full">
-                      {f}<button onClick={()=>{const p=getOrCreateProfile(selId!);const u={...p,flags:p.flags.filter((_,j)=>j!==i)};upd(c=>({...c,profiles:c.profiles.some(x=>x.studentId===selId!)?c.profiles.map(x=>x.studentId===selId!?u:x):[...c.profiles,u]}));}} className="hover:text-red-400 ml-0.5"><X size={9}/></button>
+                      {f}<button onClick={()=>{const p=getOrCreateProfile(selId!);const u={...p,flags:p.flags.filter((_,j)=>j!==i)};db.saveCounselingProfile(u);}} className="hover:text-red-400 ml-0.5"><X size={9}/></button>
                     </span>
                   ))}
                 </div>
@@ -2062,15 +2188,15 @@ function CounselingInner({state,setState}:{state:AppState;setState:(fn:(s:AppSta
 // ═══════════════════════════════════════════════════════════════════════════════
 // FEES & FINANCE MODULE
 // ═══════════════════════════════════════════════════════════════════════════════
-function FeesModule({state,setState}:{state:AppState;setState:(fn:(s:AppState)=>AppState)=>void}){
+function FeesModule({state,setState,db}:{state:AppState;setState:(fn:(s:AppState)=>AppState)=>void;db:DbOps}){
   return(
     <PasswordGate moduleId="fees" correctPw={state.settings.pwStaff} icon={<DollarSign size={28}/>} title="Fees & Finance" subtitle="School fee management — authorized staff only." accent="text-emerald-400">
-      <FeesInner state={state} setState={setState}/>
+      <FeesInner state={state} setState={setState} db={db}/>
     </PasswordGate>
   );
 }
 
-function FeesInner({state,setState}:{state:AppState;setState:(fn:(s:AppState)=>AppState)=>void}){
+function FeesInner({state,setState,db}:{state:AppState;setState:(fn:(s:AppState)=>AppState)=>void;db:DbOps}){
   const upd=(fn:(f:FeesState)=>FeesState)=>setState(s=>({...s,fees:fn(s.fees)}));
   const [filterSt,setFilterSt]=React.useState("");
   const [filterCat,setFilterCat]=React.useState<FeeCategory|"all">("all");
@@ -2097,10 +2223,10 @@ function FeesInner({state,setState}:{state:AppState;setState:(fn:(s:AppState)=>A
     const updated:FeeRecord=rec.status==="paid"
       ?{...rec,status:"unpaid",paidDate:undefined,paidAmount:undefined}
       :{...rec,status:"paid",paidDate:today,paidAmount:rec.amount};
-    upd(f=>({...f,records:f.records.map(r=>r.id===rec.id?updated:r)}));
+    db.updateFee(updated);
   }
 
-  function deleteRec(id:string){upd(f=>({...f,records:f.records.filter(r=>r.id!==id)}));}
+  function deleteRec(id:string){db.deleteFee(id);}
 
   return(
     <div className="space-y-5">
@@ -2191,7 +2317,7 @@ function FeesInner({state,setState}:{state:AppState;setState:(fn:(s:AppState)=>A
                 <div><label className="text-xs text-white/40 uppercase block mb-1.5">Due Date</label><input type="date" defaultValue={today} onChange={e=>{dueDate=e.target.value;}} className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-emerald-500/50"/></div>
               </div>
               <div><label className="text-xs text-white/40 uppercase block mb-1.5">Note (optional)</label><input onChange={e=>{note=e.target.value;}} placeholder="e.g. Balance to be paid by…" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-emerald-500/50 placeholder-white/20"/></div>
-              <button onClick={()=>{if(!label||!amount) return;const rec:FeeRecord={id:uid(),studentId:sid,category:cat,label,amount,dueDate,status,paidDate:status==="paid"?today:undefined,paidAmount:status==="paid"?amount:status==="partial"?paidAmt:undefined,note:note||undefined};upd(f=>({...f,records:[...f.records,rec]}));setPopup(null);}} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-sm py-3 rounded-xl transition-colors font-medium flex items-center justify-center gap-2"><Save size={14}/>Save Record</button>
+              <button onClick={()=>{if(!label||!amount) return;const rec:FeeRecord={id:uid(),studentId:sid,category:cat,label,amount,dueDate,status,paidDate:status==="paid"?today:undefined,paidAmount:status==="paid"?amount:status==="partial"?paidAmt:undefined,note:note||undefined};db.addFee(rec);setPopup(null);}} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-sm py-3 rounded-xl transition-colors font-medium flex items-center justify-center gap-2"><Save size={14}/>Save Record</button>
             </div>
           );})()}
         </div>
@@ -2203,11 +2329,11 @@ function FeesInner({state,setState}:{state:AppState;setState:(fn:(s:AppState)=>A
 // ═══════════════════════════════════════════════════════════════════════════════
 // INVENTORY MODULE
 // ═══════════════════════════════════════════════════════════════════════════════
-function InventoryModule({state,setState}:{state:AppState;setState:(fn:(s:AppState)=>AppState)=>void}){
-  return <InventoryInner state={state} setState={setState}/>;
+function InventoryModule({state,setState,db}:{state:AppState;setState:(fn:(s:AppState)=>AppState)=>void;db:DbOps}){
+  return <InventoryInner state={state} setState={setState} db={db}/>;
 }
 
-function InventoryInner({state,setState}:{state:AppState;setState:(fn:(s:AppState)=>AppState)=>void}){
+function InventoryInner({state,setState,db}:{state:AppState;setState:(fn:(s:AppState)=>AppState)=>void;db:DbOps}){
   const upd=(fn:(inv:InventoryState)=>InventoryState)=>setState(s=>({...s,inventory:fn(s.inventory)}));
   // "general" = show all non-lab items; labId = show specific lab (teacher view)
   const [view,setView]=React.useState<"general"|string>("general");
@@ -2254,21 +2380,22 @@ function InventoryInner({state,setState}:{state:AppState;setState:(fn:(s:AppStat
     } else { setLabPwErr(true); setLabPw(""); setTimeout(()=>setLabPwErr(false),2000); }
   }
 
-  function deleteItem(id:string){upd(inv=>({...inv,items:inv.items.filter(i=>i.id!==id)}));}
+  function deleteItem(id:string){db.deleteItem(id);}
 
   function saveItem(item:any){
-    if(item.id){ upd(inv=>({...inv,items:inv.items.map(i=>i.id===item.id?item:i)})); }
-    else { upd(inv=>({...inv,items:[...inv.items,{...item,id:uid(),labId:view==="general"?undefined:view}]})); }
+    const finalItem={...item,labId:item.labId||undefined};
+    if(item.id){ db.updateItem({...finalItem,id:item.id}); }
+    else { db.addItem({...finalItem,id:uid(),labId:view==="general"?undefined:view}); }
     setPopup(null);
   }
 
   function saveLab(lab:Omit<Lab,"id">){
-    upd(inv=>({...inv,labs:[...inv.labs,{...lab,id:uid()}]}));
+    db.addLab({...lab,id:uid()});
     setPopup(null);
   }
 
   function deleteLab(id:string){
-    upd(inv=>({...inv,labs:inv.labs.filter(l=>l.id!==id),items:inv.items.filter(i=>i.labId!==id)}));
+    db.deleteLab(id);
     if(view===id) setView("general");
   }
 
@@ -2387,7 +2514,7 @@ function InventoryInner({state,setState}:{state:AppState;setState:(fn:(s:AppStat
           )}
           {(popup.type==="addLab"||popup.type==="editLab")&&(
             <LabForm initial={popup.data} onSave={(lab:any)=>{
-              if(lab.id) upd(inv=>({...inv,labs:inv.labs.map(l=>l.id===lab.id?lab:l)}));
+              if(lab.id) db.updateLab(lab);
               else saveLab(lab);
               setPopup(null);
             }} onClose={()=>setPopup(null)}/>
@@ -2482,7 +2609,7 @@ function InventoryItemForm({initial,labId,labs,onSave,onClose,condCfg}:{initial?
 // ═══════════════════════════════════════════════════════════════════════════════
 // BEHAVIOR / DISCIPLINE MODULE
 // ═══════════════════════════════════════════════════════════════════════════════
-function BehaviorModule({state,setState}:{state:AppState;setState:(fn:(s:AppState)=>AppState)=>void}){
+function BehaviorModule({state,setState,db}:{state:AppState;setState:(fn:(s:AppState)=>AppState)=>void;db:DbOps}){
   const upd=(fn:(b:BehaviorState)=>BehaviorState)=>setState(s=>({...s,behavior:fn(s.behavior)}));
   const [filterSt,setFilterSt]=useState("");
   const [filterType,setFilterType]=useState<"all"|"positive"|"negative">("all");
@@ -2515,12 +2642,12 @@ function BehaviorModule({state,setState}:{state:AppState;setState:(fn:(s:AppStat
   const totalNeg=state.behavior.records.filter(r=>r.type==="negative").length;
   const openCount=state.behavior.records.filter(r=>r.status==="open").length;
 
-  function deleteRecord(id:string){upd(b=>({...b,records:b.records.filter(r=>r.id!==id)}));}
+  function deleteRecord(id:string){db.deleteBehavior(id);}
 
   function cycleStatus(rec:BehaviorRecord){
     const order:BehaviorStatus[]=["open","monitoring","resolved"];
     const next=order[(order.indexOf(rec.status)+1)%order.length];
-    upd(b=>({...b,records:b.records.map(r=>r.id===rec.id?{...r,status:next}:r)}));
+    db.updateBehavior({...rec,status:next});
   }
 
   return(
@@ -2626,8 +2753,8 @@ function BehaviorModule({state,setState}:{state:AppState;setState:(fn:(s:AppStat
             categories={CATEGORIES}
             sevCfg={SEV_CFG}
             onSave={rec=>{
-              if(rec.id) upd(b=>({...b,records:b.records.map(r=>r.id===rec.id?rec:r)}));
-              else upd(b=>({...b,records:[{...rec,id:uid()},...b.records]}));
+              if(rec.id) db.updateBehavior(rec);
+              else db.addBehavior({...rec,id:uid()});
               setPopup(null);
             }}
             onClose={()=>setPopup(null)}
@@ -4064,7 +4191,211 @@ export default function SchoolERP() {
   const [showReg,setReg] = useState(false);
   const [route,setRoute] = useState<string>("home"); // public site route
   const [inDash,setInDash] = useState(false); // true = show dashboard
+  const [dbStatus,setDbStatus] = useState<"idle"|"loading"|"ok"|"offline">("idle");
   const update = (fn:(s:AppState)=>AppState)=>setState(fn);
+
+  // ─── Supabase: Load data on mount ──────────────────────────────────────────
+  useEffect(() => {
+    if (!sb.isConfigured()) { setDbStatus("offline"); return; }
+    setDbStatus("loading");
+    Promise.all([
+      sb.select<any>("students"),
+      sb.select<any>("teachers"),
+      sb.select<any>("inventory_items"),
+      sb.select<any>("labs"),
+      sb.select<any>("fees"),
+      sb.select<any>("behavior"),
+      sb.select<any>("counseling_profiles"),
+    ]).then(([students, teachers, items, labs, fees, behavior, counseling]) => {
+      setState(prev => ({
+        ...prev,
+        students:  students.length  ? students.map(dbToStudent)  : prev.students,
+        teachers:  teachers.length  ? teachers.map(dbToTeacher)  : prev.teachers,
+        inventory: {
+          labs:  labs.length  ? labs.map(dbToLab)   : prev.inventory.labs,
+          items: items.length ? items.map(dbToItem)  : prev.inventory.items,
+        },
+        fees:     { records: fees.length     ? fees.map(dbToFee)              : prev.fees.records },
+        behavior: { records: behavior.length ? behavior.map(dbToBehavior)     : prev.behavior.records },
+        counseling:{ profiles: counseling.length ? counseling.map(dbToCounselingProfile) : prev.counseling.profiles },
+      }));
+      setDbStatus("ok");
+    }).catch(() => setDbStatus("offline"));
+  }, []);
+
+  // ─── Row mappers: DB snake_case → app camelCase ────────────────────────────
+  function dbToStudent(r: any): Student {
+    return { id: r.id, name: r.name, rollNo: r.roll_no, classId: r.class_id,
+      photo: r.photo || `https://api.dicebear.com/7.x/avataaars/svg?seed=${r.name}`,
+      marks: r.marks || {}, password: r.password || "changeme",
+      profile: r.profile || undefined };
+  }
+  function dbToTeacher(r: any): Teacher {
+    return { id: r.id, name: r.name, email: r.email, subjectIds: r.subject_ids || [],
+      classIds: r.class_ids || [], password: r.password || "changeme",
+      profile: r.profile || undefined };
+  }
+  function dbToItem(r: any): InventoryItem {
+    return { id: r.id, name: r.name, category: r.category, quantity: r.quantity,
+      unit: r.unit, condition: r.condition, location: r.location,
+      lastChecked: r.last_checked, note: r.note || undefined, labId: r.lab_id || undefined };
+  }
+  function dbToLab(r: any): Lab {
+    return { id: r.id, name: r.name, icon: r.icon, password: r.password,
+      description: r.description || "", color: r.color || "bg-blue-500/10 border-blue-500/20" };
+  }
+  function dbToFee(r: any): FeeRecord {
+    return { id: r.id, studentId: r.student_id, category: r.category, label: r.label,
+      amount: r.amount, dueDate: r.due_date, status: r.status,
+      paidDate: r.paid_date || undefined, paidAmount: r.paid_amount || undefined,
+      note: r.note || undefined };
+  }
+  function dbToBehavior(r: any): BehaviorRecord {
+    return { id: r.id, studentId: r.student_id, date: r.date, type: r.type,
+      severity: r.severity, category: r.category, description: r.description,
+      actionTaken: r.action_taken || "", status: r.status, reportedBy: r.reported_by || "Admin" };
+  }
+  function dbToCounselingProfile(r: any): CounselingProfile {
+    return { studentId: r.student_id, background: r.background || "",
+      sessions: r.sessions || [], flags: r.flags || [] };
+  }
+
+  // ─── DB Operations (Supabase + local state) ────────────────────────────────
+  const db: DbOps = {
+    connected: dbStatus === "ok",
+
+    // Students
+    async addStudent(s) {
+      update(st => ({ ...st, students: [...st.students, s] }));
+      await sb.upsert("students", {
+        id: s.id, name: s.name, roll_no: s.rollNo, class_id: s.classId,
+        photo: s.photo, marks: s.marks, password: s.password, profile: s.profile ?? null,
+      });
+    },
+    async updateStudent(s) {
+      update(st => ({ ...st, students: st.students.map(x => x.id === s.id ? s : x) }));
+      await sb.update("students", s.id, {
+        name: s.name, roll_no: s.rollNo, class_id: s.classId,
+        photo: s.photo, marks: s.marks, password: s.password, profile: s.profile ?? null,
+      });
+    },
+    async deleteStudent(id) {
+      update(st => ({ ...st, students: st.students.filter(x => x.id !== id) }));
+      await sb.delete("students", id);
+    },
+
+    // Teachers
+    async addTeacher(t) {
+      update(st => ({ ...st, teachers: [...st.teachers, t] }));
+      await sb.upsert("teachers", {
+        id: t.id, name: t.name, email: t.email, subject_ids: t.subjectIds,
+        class_ids: t.classIds, password: t.password, profile: t.profile ?? null,
+      });
+    },
+    async updateTeacher(t) {
+      update(st => ({ ...st, teachers: st.teachers.map(x => x.id === t.id ? t : x) }));
+      await sb.update("teachers", t.id, {
+        name: t.name, email: t.email, subject_ids: t.subjectIds,
+        class_ids: t.classIds, password: t.password, profile: t.profile ?? null,
+      });
+    },
+    async deleteTeacher(id) {
+      update(st => ({ ...st, teachers: st.teachers.filter(x => x.id !== id) }));
+      await sb.delete("teachers", id);
+    },
+
+    // Inventory items
+    async addItem(i) {
+      update(st => ({ ...st, inventory: { ...st.inventory, items: [...st.inventory.items, i] } }));
+      await sb.upsert("inventory_items", {
+        id: i.id, name: i.name, category: i.category, quantity: i.quantity,
+        unit: i.unit, condition: i.condition, location: i.location,
+        last_checked: i.lastChecked, note: i.note ?? null, lab_id: i.labId ?? null,
+      });
+    },
+    async updateItem(i) {
+      update(st => ({ ...st, inventory: { ...st.inventory, items: st.inventory.items.map(x => x.id === i.id ? i : x) } }));
+      await sb.update("inventory_items", i.id, {
+        name: i.name, category: i.category, quantity: i.quantity,
+        unit: i.unit, condition: i.condition, location: i.location,
+        last_checked: i.lastChecked, note: i.note ?? null, lab_id: i.labId ?? null,
+      });
+    },
+    async deleteItem(id) {
+      update(st => ({ ...st, inventory: { ...st.inventory, items: st.inventory.items.filter(x => x.id !== id) } }));
+      await sb.delete("inventory_items", id);
+    },
+
+    // Labs
+    async addLab(l) {
+      update(st => ({ ...st, inventory: { ...st.inventory, labs: [...st.inventory.labs, l] } }));
+      await sb.upsert("labs", { id: l.id, name: l.name, icon: l.icon, password: l.password, description: l.description, color: l.color });
+    },
+    async updateLab(l) {
+      update(st => ({ ...st, inventory: { ...st.inventory, labs: st.inventory.labs.map(x => x.id === l.id ? l : x) } }));
+      await sb.update("labs", l.id, { name: l.name, icon: l.icon, password: l.password, description: l.description, color: l.color });
+    },
+    async deleteLab(id) {
+      update(st => ({ ...st, inventory: { ...st.inventory, labs: st.inventory.labs.filter(x => x.id !== id), items: st.inventory.items.filter(x => x.labId !== id) } }));
+      await sb.delete("labs", id);
+    },
+
+    // Fees
+    async addFee(f) {
+      update(st => ({ ...st, fees: { records: [...st.fees.records, f] } }));
+      await sb.upsert("fees", {
+        id: f.id, student_id: f.studentId, category: f.category, label: f.label,
+        amount: f.amount, due_date: f.dueDate, status: f.status,
+        paid_date: f.paidDate ?? null, paid_amount: f.paidAmount ?? null, note: f.note ?? null,
+      });
+    },
+    async updateFee(f) {
+      update(st => ({ ...st, fees: { records: st.fees.records.map(x => x.id === f.id ? f : x) } }));
+      await sb.update("fees", f.id, {
+        status: f.status, paid_date: f.paidDate ?? null,
+        paid_amount: f.paidAmount ?? null, note: f.note ?? null,
+      });
+    },
+    async deleteFee(id) {
+      update(st => ({ ...st, fees: { records: st.fees.records.filter(x => x.id !== id) } }));
+      await sb.delete("fees", id);
+    },
+
+    // Behavior
+    async addBehavior(b) {
+      update(st => ({ ...st, behavior: { records: [...st.behavior.records, b] } }));
+      await sb.upsert("behavior", {
+        id: b.id, student_id: b.studentId, date: b.date, type: b.type,
+        severity: b.severity, category: b.category, description: b.description,
+        action_taken: b.actionTaken, status: b.status, reported_by: b.reportedBy,
+      });
+    },
+    async updateBehavior(b) {
+      update(st => ({ ...st, behavior: { records: st.behavior.records.map(x => x.id === b.id ? b : x) } }));
+      await sb.update("behavior", b.id, {
+        severity: b.severity, category: b.category, description: b.description,
+        action_taken: b.actionTaken, status: b.status,
+      });
+    },
+    async deleteBehavior(id) {
+      update(st => ({ ...st, behavior: { records: st.behavior.records.filter(x => x.id !== id) } }));
+      await sb.delete("behavior", id);
+    },
+
+    // Counseling
+    async saveCounselingProfile(p) {
+      update(st => {
+        const existing = st.counseling.profiles.find(x => x.studentId === p.studentId);
+        return { ...st, counseling: { profiles: existing
+          ? st.counseling.profiles.map(x => x.studentId === p.studentId ? p : x)
+          : [...st.counseling.profiles, p] }};
+      });
+      await sb.upsert("counseling_profiles", {
+        student_id: p.studentId, background: p.background,
+        sessions: p.sessions, flags: p.flags,
+      });
+    },
+  };
 
   const globalStyle = `
     @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Playfair+Display:wght@400;600;700;900&family=Inter:wght@300;400;500;600&display=swap');
@@ -4087,12 +4418,18 @@ export default function SchoolERP() {
   // Dashboard routes
   if(inDash){
     if(showReg) return(<><style>{globalStyle}</style><RegistrationScreen state={state} setState={update} onBack={()=>setReg(false)}/></>);
-    if(!user) return(<><style>{globalStyle}</style><LoginScreen state={state} onLogin={setUser} onRegister={()=>setReg(true)} onBack={()=>setInDash(false)}/></>);
+    if(!user) return(<><style>{globalStyle}</style><LoginScreen state={state} db={db} onLogin={setUser} onRegister={()=>setReg(true)} onBack={()=>setInDash(false)}/></>);
     return(
       <>
         <style>{globalStyle}</style>
-        {(user.role==="admin")         &&<AdminView   user={user} state={state} setState={update} onLogout={()=>{setUser(null);setInDash(false);}}/>}
-        {(user.role==="support_admin") &&<AdminView   user={user} state={state} setState={update} onLogout={()=>{setUser(null);setInDash(false);}} isSA/>}
+        {/* DB status badge */}
+        <div style={{position:"fixed",bottom:12,right:12,zIndex:9999}}>
+          {dbStatus==="loading"&&<div className="flex items-center gap-1.5 bg-[#080D18] border border-white/10 rounded-full px-3 py-1.5 text-[10px] text-white/40"><Database size={10} className="animate-pulse text-blue-400"/>Connecting to DB…</div>}
+          {dbStatus==="ok"&&<div className="flex items-center gap-1.5 bg-[#080D18] border border-emerald-500/20 rounded-full px-3 py-1.5 text-[10px] text-emerald-400"><Wifi size={10}/>Supabase connected</div>}
+          {dbStatus==="offline"&&<div className="flex items-center gap-1.5 bg-[#080D18] border border-amber-500/20 rounded-full px-3 py-1.5 text-[10px] text-amber-400"><WifiOff size={10}/>Local mode (no DB)</div>}
+        </div>
+        {(user.role==="admin")         &&<AdminView   user={user} state={state} setState={update} db={db} onLogout={()=>{setUser(null);setInDash(false);}}/>}
+        {(user.role==="support_admin") &&<AdminView   user={user} state={state} setState={update} db={db} onLogout={()=>{setUser(null);setInDash(false);}} isSA/>}
         {user.role==="teacher"         &&<TeacherView user={user} state={state} setState={update} onLogout={()=>{setUser(null);setInDash(false);}}/>}
         {user.role==="student"         &&<StudentView user={user} state={state} onLogout={()=>{setUser(null);setInDash(false);}}/>}
       </>
