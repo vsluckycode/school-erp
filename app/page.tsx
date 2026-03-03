@@ -1250,15 +1250,15 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
                         <div className="text-xs text-white/40">{u._role} {"rollNo" in u?`· Roll ${u.rollNo}`:("email" in u?`· ${u.email}`:"")}</div>
                       </div>
                       <div className="flex gap-2 flex-shrink-0">
-                        <button onClick={()=>{
-                          if(u._role==="Teacher") upd(s=>({...s,teachers:s.teachers.map(t=>t.id===u.id?{...t,status:"approved" as const}:t)}));
-                          else upd(s=>({...s,students:s.students.map(st=>st.id===u.id?{...st,status:"approved" as const}:st)}));
+                        <button onClick={async ()=>{
+                          if(u._role==="Teacher"){upd(s=>({...s,teachers:s.teachers.map(t=>t.id===u.id?{...t,status:"approved" as const}:t)}));if(sb.isConfigured())await sb.update("teachers",u.id,{status:"approved"});}
+                          else{upd(s=>({...s,students:s.students.map(st=>st.id===u.id?{...st,status:"approved" as const}:st)}));if(sb.isConfigured())await sb.update("students",u.id,{status:"approved"});}
                         }} className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-1.5 rounded-lg transition-colors font-medium">
                           <Check size={11}/>Approve
                         </button>
-                        <button onClick={()=>{
-                          if(u._role==="Teacher") upd(s=>({...s,teachers:s.teachers.filter(t=>t.id!==u.id)}));
-                          else upd(s=>({...s,students:s.students.filter(st=>st.id!==u.id)}));
+                        <button onClick={async ()=>{
+                          if(u._role==="Teacher"){upd(s=>({...s,teachers:s.teachers.filter(t=>t.id!==u.id)}));if(sb.isConfigured())await sb.delete("teachers",u.id);}
+                          else{upd(s=>({...s,students:s.students.filter(st=>st.id!==u.id)}));if(sb.isConfigured())await sb.delete("students",u.id);}
                         }} className="flex items-center gap-1.5 border border-red-500/30 text-red-400 hover:bg-red-500/10 text-xs px-3 py-1.5 rounded-lg transition-colors">
                           <X size={11}/>Reject
                         </button>
@@ -1304,7 +1304,7 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
           <div className="bg-[#080D18] border border-white/5 rounded-xl p-5">
             <h3 className="text-xs font-semibold text-white/50 uppercase tracking-widest mb-4">Today's Attendance</h3>
             <div className="space-y-2">
-              {state.students.map(s=>{
+              {state.students.filter(s=>s.status!=="pending").map(s=>{
                 const present=state.attendance[today]?.[s.rollNo];
                 return(
                   <div key={s.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-white/5">
@@ -1366,17 +1366,27 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
                     </div>
                     <div className="flex gap-2 flex-shrink-0">
                       <button
-                        onClick={()=>{
-                          if(u._role==="Teacher") upd(s=>({...s,teachers:s.teachers.map(t=>t.id===u.id?{...t,status:"approved" as const}:t)}));
-                          else upd(s=>({...s,students:s.students.map(st=>st.id===u.id?{...st,status:"approved" as const}:st)}));
+                        onClick={async ()=>{
+                          if(u._role==="Teacher"){
+                            upd(s=>({...s,teachers:s.teachers.map(t=>t.id===u.id?{...t,status:"approved" as const}:t)}));
+                            if(sb.isConfigured()) await sb.update("teachers",u.id,{status:"approved"});
+                          } else {
+                            upd(s=>({...s,students:s.students.map(st=>st.id===u.id?{...st,status:"approved" as const}:st)}));
+                            if(sb.isConfigured()) await sb.update("students",u.id,{status:"approved"});
+                          }
                         }}
                         className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-4 py-2 rounded-xl transition-colors font-medium">
                         <Check size={12}/>Approve
                       </button>
                       <button
-                        onClick={()=>{
-                          if(u._role==="Teacher") upd(s=>({...s,teachers:s.teachers.filter(t=>t.id!==u.id)}));
-                          else upd(s=>({...s,students:s.students.filter(st=>st.id!==u.id)}));
+                        onClick={async ()=>{
+                          if(u._role==="Teacher"){
+                            upd(s=>({...s,teachers:s.teachers.filter(t=>t.id!==u.id)}));
+                            if(sb.isConfigured()) await sb.delete("teachers",u.id);
+                          } else {
+                            upd(s=>({...s,students:s.students.filter(st=>st.id!==u.id)}));
+                            if(sb.isConfigured()) await sb.delete("students",u.id);
+                          }
                         }}
                         className="flex items-center gap-1.5 border border-red-500/30 text-red-400 hover:bg-red-500/10 text-xs px-4 py-2 rounded-xl transition-colors">
                         <X size={12}/>Reject
@@ -1463,7 +1473,7 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
           {csvMsg&&<div className="flex items-center gap-2 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-2.5"><CheckCircle size={12}/><span className="flex-1">{csvMsg}</span><button onClick={()=>setCsvMsg("")} className="text-white/30 hover:text-white/60"><X size={11}/></button></div>}
           <div className="text-[10px] text-white/30 bg-white/3 border border-white/5 rounded-lg px-3 py-2">CSV columns: <span className="font-mono text-white/50">name, email, password, dob, gender, phone, address, qualification, specialization, join_date, nic</span></div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {state.teachers.map(t=>{
+            {state.teachers.filter(t=>t.status!=="pending").map(t=>{
               const subs=state.subjects.filter(s=>t.subjectIds.includes(s.id));
               const cls=state.classes.filter(c=>t.classIds.includes(c.id));
               const ownCls=state.classes.filter(c=>c.teacherId===t.id);
@@ -1513,7 +1523,7 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
           <div className="bg-[#080D18] border border-white/5 rounded-xl overflow-hidden overflow-x-auto">
             <table className="w-full">
               <thead><tr className="border-b border-white/5">{["","Roll","Name","Class","Profile",""].map((h,i)=><th key={i} className="text-left text-xs font-semibold text-white/40 uppercase tracking-wider px-4 py-3">{h}</th>)}</tr></thead>
-              <tbody>{state.students.map(st=>{
+              <tbody>{state.students.filter(st=>st.status!=="pending").map(st=>{
                 const cls=state.classes.find(c=>c.id===st.classId);
                 const d=decProfile(st.profile);
                 return(
@@ -4503,11 +4513,13 @@ export default function SchoolERP() {
     return { id: r.id, name: r.name, rollNo: r.roll_no, classId: r.class_id,
       photo: r.photo || `https://api.dicebear.com/7.x/avataaars/svg?seed=${r.name}`,
       marks: r.marks || {}, password: r.password || "changeme",
+      status: r.status || undefined,
       profile: r.profile || undefined };
   }
   function dbToTeacher(r: any): Teacher {
     return { id: r.id, name: r.name, email: r.email, subjectIds: r.subject_ids || [],
       classIds: r.class_ids || [], password: r.password || "changeme",
+      status: r.status || undefined,
       profile: r.profile || undefined };
   }
   function dbToItem(r: any): InventoryItem {
