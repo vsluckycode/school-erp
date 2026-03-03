@@ -102,6 +102,32 @@ const sb = {
     if (!res.ok) { console.error(`[sb.delete] ${table}:`, await res.text()); return false; }
     return true;
   },
+
+  // ─── Save/load the entire shared config (subjects, classes, timetable, settings)
+  // Uses a single row in app_config table: { id: 'main', data: jsonb }
+  // SQL to create:  create table if not exists app_config (id text primary key, data jsonb);
+  async saveConfig(payload: object): Promise<void> {
+    if (!this.isConfigured()) return;
+    try {
+      const h = { ...this.headers(), "Prefer": "resolution=merge-duplicates" } as HeadersInit;
+      await fetch(`${SUPABASE_URL}/rest/v1/app_config`, {
+        method: "POST", headers: h,
+        body: JSON.stringify({ id: "main", data: payload }),
+      });
+    } catch (e) { console.warn("[sb.saveConfig]", e); }
+  },
+
+  async loadConfig(): Promise<any | null> {
+    if (!this.isConfigured()) return null;
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/app_config?id=eq.main`, {
+        headers: this.headers() as HeadersInit,
+      });
+      if (!res.ok) return null;
+      const arr = await res.json();
+      return arr[0]?.data ?? null;
+    } catch { return null; }
+  },
 };
 
 // ─── DB Operations Interface (passed as prop) ─────────────────────────────────
@@ -4585,16 +4611,30 @@ export default function SchoolERP() {
   const [dbStatus,setDbStatus] = useState<"idle"|"loading"|"ok"|"offline">("idle");
 
   // ─── Persist full state to localStorage on every change ───────────────────
+  // Debounce timer ref for Supabase config saves
+  const configSaveTimer = React.useRef<ReturnType<typeof setTimeout>|null>(null);
+
   const update = (fn:(s:AppState)=>AppState) => {
     setState(prev => {
       const next = fn(prev);
+      // Save to localStorage immediately
       try {
-        // Don't save logoUrl if it's a large base64 — save separately
         const toSave = next.settings.logoUrl?.startsWith("data:")
           ? { ...next, settings: { ...next.settings, logoUrl: "" } }
           : next;
         localStorage.setItem(STATE_KEY, JSON.stringify(toSave));
       } catch {}
+      // Debounce Supabase config save (saves subjects, classes, timetable, settings)
+      if (configSaveTimer.current) clearTimeout(configSaveTimer.current);
+      configSaveTimer.current = setTimeout(() => {
+        const config = {
+          subjects:  next.subjects,
+          classes:   next.classes,
+          timetable: next.timetable,
+          settings:  { ...next.settings, logoUrl: next.settings.logoUrl?.startsWith("data:") ? "" : (next.settings.logoUrl || "") },
+        };
+        sb.saveConfig(config);
+      }, 800);
       return next;
     });
   };
@@ -4628,38 +4668,29 @@ export default function SchoolERP() {
       sb.select<any>("fees"),
       sb.select<any>("behavior"),
       sb.select<any>("counseling_profiles"),
-      sb.select<any>("subjects"),
-      sb.select<any>("classes"),
-      sb.select<any>("timetable"),
-    ]).then(([students, teachers, items, labs, fees, behavior, counseling, subjects, classes, timetable]) => {
-      update(prev => {
-        // Build timetable map from flat rows
-        const ttMap: Record<string,any[]> = {};
-        timetable.forEach((r:any) => {
-          if (!ttMap[r.class_id]) ttMap[r.class_id] = [];
-          ttMap[r.class_id].push({ day: r.day, period: r.period, subjectId: r.subject_id, teacherId: r.teacher_id });
-        });
-        return {
-          ...prev,
-          students:  students.length  ? students.map(dbToStudent)  : prev.students,
-          teachers:  teachers.length  ? teachers.map(dbToTeacher)  : prev.teachers,
-          subjects:  subjects.length  ? subjects.map((r:any) => ({ id:r.id, name:r.name, code:r.code, classIds:r.class_ids||[], teacherId:r.teacher_id||"" })) : prev.subjects,
-          classes:   classes.length   ? classes.map((r:any)  => ({ id:r.id, name:r.name, section:r.section, teacherId:r.teacher_id||"" }))  : prev.classes,
-          timetable: timetable.length ? ttMap : prev.timetable,
-          inventory: {
-            labs:  labs.length  ? labs.map(dbToLab)   : prev.inventory.labs,
-            items: items.length ? items.map(dbToItem)  : prev.inventory.items,
-          },
-          fees:      { records: fees.length     ? fees.map(dbToFee)                       : prev.fees.records },
-          behavior:  { records: behavior.length ? behavior.map(dbToBehavior)              : prev.behavior.records },
-          counseling:{ profiles: counseling.length ? counseling.map(dbToCounselingProfile) : prev.counseling.profiles },
-        };
-      });
+      sb.loadConfig(),
+    ]).then(([students, teachers, items, labs, fees, behavior, counseling, config]) => {
+      update(prev => ({
+        ...prev,
+        subjects:  config?.subjects  ?? prev.subjects,
+        classes:   config?.classes   ?? prev.classes,
+        timetable: config?.timetable ?? prev.timetable,
+        settings:  config?.settings  ? { ...prev.settings, ...config.settings } : prev.settings,
+        students:  students.length  ? students.map(dbToStudent)  : prev.students,
+        teachers:  teachers.length  ? teachers.map(dbToTeacher)  : prev.teachers,
+        inventory: {
+          labs:  labs.length  ? labs.map(dbToLab)   : prev.inventory.labs,
+          items: items.length ? items.map(dbToItem)  : prev.inventory.items,
+        },
+        fees:      { records: fees.length     ? fees.map(dbToFee)                        : prev.fees.records },
+        behavior:  { records: behavior.length ? behavior.map(dbToBehavior)               : prev.behavior.records },
+        counseling:{ profiles: counseling.length ? counseling.map(dbToCounselingProfile) : prev.counseling.profiles },
+      }));
       setDbStatus("ok");
     }).catch(() => setDbStatus("offline"));
   }, []);
 
-  // ─── Row mappers: DB snake_case → app camelCase ────────────────────────────
+    // ─── Row mappers: DB snake_case → app camelCase ────────────────────────────
   function dbToStudent(r: any): Student {
     let profile = r.profile || undefined;
     if (!profile) {
