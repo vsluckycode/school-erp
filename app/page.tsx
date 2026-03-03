@@ -168,7 +168,7 @@ type Grade = "S" | "A" | "B" | "C" | "W" | "-";
 interface StudentProfile { dob?:string; gender?:string; address?:string; phone?:string; parentName?:string; parentPhone?:string; bloodGroup?:string; nic?:string; }
 interface TeacherProfile { dob?:string; gender?:string; address?:string; phone?:string; qualification?:string; joinDate?:string; nic?:string; specialization?:string; }
 interface Student { id:string; name:string; rollNo:string; classId:string; photo:string; marks:Record<string,number>; password:string; profile?:StudentProfile; status?:"pending"|"approved"; }
-interface Teacher { id:string; name:string; email:string; subjectIds:string[]; classIds:string[]; password:string; profile?:TeacherProfile; status?:"pending"|"approved"; }
+interface Teacher { id:string; name:string; email:string; subjectIds:string[]; classIds:string[]; password:string; photo?:string; profile?:TeacherProfile; status?:"pending"|"approved"; }
 interface Subject { id:string; name:string; code:string; classIds:string[]; teacherId:string }
 interface Class   { id:string; name:string; section:string; teacherId:string }
 interface TimetableSlot { day:string; period:number; subjectId:string; teacherId:string }
@@ -579,13 +579,21 @@ function StudentProfileModal({student,state,onSave,onClose}:{student:Student;sta
   const [sName,setSName]=useState(student.name);
   const [sRoll,setSRoll]=useState(student.rollNo);
   const [sClass,setSClass]=useState(student.classId);
+  const [photo,setPhoto]=useState(student.photo||"");
   const [form,setForm]=useState({dob:d.dob||"",gender:d.gender||"",phone:d.phone||"",address:d.address||"",parentName:d.parentName||"",parentPhone:d.parentPhone||"",bloodGroup:d.bloodGroup||"",nic:d.nic||""});
   const set=(k:keyof typeof form)=>(v:string)=>setForm(f=>({...f,[k]:v}));
   const cls=state.classes.find(c=>c.id===student.classId);
   const [showIDCard,setShowIDCard]=useState(false);
+  function handlePhoto(e:React.ChangeEvent<HTMLInputElement>){
+    const file=e.target.files?.[0];if(!file)return;
+    if(file.size>2*1024*1024){alert("Image must be under 2MB");return;}
+    const reader=new FileReader();
+    reader.onload=ev=>setPhoto(ev.target?.result as string);
+    reader.readAsDataURL(file);
+  }
   function save(){
     const enc=encProfile(form);
-    const updated:Student={...student,name:sName.trim()||student.name,rollNo:sRoll.trim()||student.rollNo,classId:sClass,profile:enc};
+    const updated:Student={...student,name:sName.trim()||student.name,rollNo:sRoll.trim()||student.rollNo,classId:sClass,profile:enc,photo:photo||student.photo};
     try{localStorage.setItem(`student_profile_${student.id}`,JSON.stringify(enc));}catch{}
     onSave(updated);
     onClose();
@@ -593,7 +601,17 @@ function StudentProfileModal({student,state,onSave,onClose}:{student:Student;sta
   return(
     <div className="bg-[#080D18] border border-white/10 rounded-2xl p-6 w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto">
       <div className="flex items-center gap-3 mb-5">
-        <img src={student.photo} className="w-12 h-12 rounded-xl border border-white/10"/>
+        <label className="cursor-pointer group relative flex-shrink-0">
+          {photo
+            ?<img src={photo} className="w-16 h-16 rounded-xl border border-white/10 object-cover"/>
+            :<div className="w-16 h-16 rounded-xl bg-gradient-to-br from-blue-500/30 to-purple-500/30 border border-white/10 flex items-center justify-center text-white font-bold text-2xl">{(sName||student.name)[0]}</div>
+          }
+          <div className="absolute inset-0 bg-black/60 rounded-xl opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center transition-opacity gap-1">
+            <Upload size={16} className="text-white"/>
+            <span className="text-white text-[9px] font-medium">PHOTO</span>
+          </div>
+          <input type="file" accept="image/*" className="hidden" onChange={handlePhoto}/>
+        </label>
         <div className="flex-1 min-w-0 space-y-1">
           <input value={sName} onChange={e=>setSName(e.target.value)} className="w-full bg-transparent text-white font-bold text-sm outline-none border-b border-white/10 focus:border-blue-500/50 pb-0.5"/>
           <div className="flex gap-2">
@@ -626,7 +644,7 @@ function StudentProfileModal({student,state,onSave,onClose}:{student:Student;sta
       </div>
       {showIDCard&&(
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4" onClick={e=>e.target===e.currentTarget&&setShowIDCard(false)}>
-          <StudentIDCard student={student} cls={cls} schoolName={state.settings.name} schoolTagline={state.settings.tagline} onClose={()=>setShowIDCard(false)}/>
+          <StudentIDCard student={{...student,photo:photo||student.photo}} cls={cls} schoolName={state.settings.name} schoolTagline={state.settings.tagline} onClose={()=>setShowIDCard(false)}/>
         </div>
       )}
     </div>
@@ -741,20 +759,37 @@ function TeacherProfileModal({teacher,state,onSave,onClose}:{teacher:Teacher;sta
   const d=decProfile(teacher.profile);
   const [name,setName]=useState(teacher.name);
   const [email,setEmail]=useState(teacher.email);
+  const [photo,setPhoto]=useState(teacher.photo||"");
   const [form,setForm]=useState({dob:d.dob||"",gender:d.gender||"",phone:d.phone||"",address:d.address||"",qualification:d.qualification||"",specialization:d.specialization||"",joinDate:d.joinDate||"",nic:d.nic||""});
   const set=(k:keyof typeof form)=>(v:string)=>setForm(f=>({...f,[k]:v}));
+  function handlePhoto(e:React.ChangeEvent<HTMLInputElement>){
+    const file=e.target.files?.[0];if(!file)return;
+    if(file.size>2*1024*1024){alert("Image must be under 2MB");return;}
+    const reader=new FileReader();
+    reader.onload=ev=>setPhoto(ev.target?.result as string);
+    reader.readAsDataURL(file);
+  }
   function save(){
     const enc=encProfile(form);
-    const updated:Teacher={...teacher,name:name.trim()||teacher.name,email:email.trim()||teacher.email,profile:enc};
-    // persist profile to localStorage as fallback in case Supabase profile column missing
-    try{const key=`teacher_profile_${teacher.id}`;localStorage.setItem(key,JSON.stringify(enc));}catch{}
+    const updated:Teacher={...teacher,name:name.trim()||teacher.name,email:email.trim()||teacher.email,profile:enc,...(photo?{photo}:{})};
+    try{localStorage.setItem(`teacher_profile_${teacher.id}`,JSON.stringify(enc));}catch{}
     onSave(updated);
     onClose();
   }
   return(
     <div className="bg-[#080D18] border border-white/10 rounded-2xl p-6 w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto">
       <div className="flex items-center gap-3 mb-5">
-        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-500/30 to-blue-500/30 border border-white/10 flex items-center justify-center text-white font-bold text-lg">{(name||teacher.name)[0]}</div>
+        <label className="cursor-pointer group relative flex-shrink-0">
+          {photo
+            ?<img src={photo} className="w-16 h-16 rounded-xl border border-white/10 object-cover"/>
+            :<div className="w-16 h-16 rounded-xl bg-gradient-to-br from-purple-500/30 to-blue-500/30 border border-white/10 flex items-center justify-center text-white font-bold text-2xl">{(name||teacher.name)[0]}</div>
+          }
+          <div className="absolute inset-0 bg-black/60 rounded-xl opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center transition-opacity gap-1">
+            <Upload size={16} className="text-white"/>
+            <span className="text-white text-[9px] font-medium">PHOTO</span>
+          </div>
+          <input type="file" accept="image/*" className="hidden" onChange={handlePhoto}/>
+        </label>
         <div className="flex-1 min-w-0">
           <input value={name} onChange={e=>setName(e.target.value)} className="w-full bg-transparent text-white font-bold text-sm outline-none border-b border-white/10 focus:border-blue-500/50 pb-0.5 mb-1"/>
           <input value={email} onChange={e=>setEmail(e.target.value)} className="w-full bg-transparent text-white/40 text-xs outline-none border-b border-white/10 focus:border-blue-500/50 pb-0.5"/>
@@ -1573,7 +1608,7 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
               return(
                 <div key={t.id} className="bg-[#080D18] border border-white/5 rounded-xl p-5 hover:border-blue-500/20 transition-all">
                   <div className="flex items-center gap-3 mb-4">
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500/30 to-purple-500/30 border border-white/10 flex items-center justify-center text-white font-bold">{t.name[0]}</div>
+                    {t.photo?<img src={t.photo} className="w-10 h-10 rounded-full object-cover border border-white/10 flex-shrink-0"/>:<div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500/30 to-purple-500/30 border border-white/10 flex items-center justify-center text-white font-bold flex-shrink-0">{t.name[0]}</div>}
                     <div className="flex-1 min-w-0">
                       <div className="text-white font-semibold">{t.name}</div>
                       <div className="text-xs text-white/40">{t.email}</div>
@@ -1842,12 +1877,12 @@ function TeacherView({user,state,setState,onLogout}:
   const [sc,setSC]         = useState("");
   const [ss,setSS]         = useState("");
   const [me,setME]         = useState<Record<string,string>>({});
-  const [search,setSearch] = useState(""); // ✅ Student search
-  const [shCls,setShCls]   = useState(""); // ✅ Marksheet class
-  const [editSt,setEditSt] = useState<Student|null>(null); // ✅ Profile edit (class teachers)
+  const [search,setSearch] = useState("");
+  const [shCls,setShCls]   = useState("");
+  const [editSt,setEditSt] = useState<Student|null>(null);
+  const [editSelf,setEditSelf] = useState(false); // self profile edit
 
   const _teacher   = state.teachers.find(t=>t.id===user.id);
-
   // State still loading from Supabase — teacher not hydrated yet
   if(!_teacher) return(
     <div className="min-h-screen bg-[#05080F] flex items-center justify-center font-mono">
@@ -1879,8 +1914,13 @@ function TeacherView({user,state,setState,onLogout}:
         <div className="space-y-6 max-w-2xl">
           <div className="bg-[#080D18] border border-white/5 rounded-2xl p-6">
             <div className="flex items-center gap-5">
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-purple-500/30 to-blue-500/30 border border-white/10 flex items-center justify-center text-2xl font-bold text-white">{teacher.name[0]}</div>
-              <div>
+              <div className="relative">
+                {teacher.photo
+                  ?<img src={teacher.photo} className="w-16 h-16 rounded-2xl object-cover border border-white/10"/>
+                  :<div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-purple-500/30 to-blue-500/30 border border-white/10 flex items-center justify-center text-2xl font-bold text-white">{teacher.name[0]}</div>
+                }
+              </div>
+              <div className="flex-1">
                 <h2 className="text-xl font-bold text-white">{teacher.name}</h2>
                 <p className="text-white/40 text-sm">{teacher.email}</p>
                 <div className="flex gap-2 mt-1 flex-wrap">
@@ -1888,6 +1928,7 @@ function TeacherView({user,state,setState,onLogout}:
                   {myOwnCls.map(c=><span key={c.id} className="text-xs bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full">Class Teacher {c.name}-{c.section}</span>)}
                 </div>
               </div>
+              <button onClick={()=>setEditSelf(true)} className="flex items-center gap-1.5 text-xs border border-white/10 text-white/40 hover:text-blue-400 hover:border-blue-500/30 px-3 py-1.5 rounded-lg transition-colors flex-shrink-0"><Edit2 size={12}/>Edit</button>
             </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -2110,16 +2151,18 @@ function TeacherView({user,state,setState,onLogout}:
   return(
     <Layout user={user} state={state} navItems={NAV} activeTab={tab} setTab={setTab} onLogout={onLogout}>
       {renderTab()}
-      {editSt&&<div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"><StudentProfileModal student={editSt} state={state} onSave={u=>setState(s=>({...s,students:s.students.map(x=>x.id===u.id?u:x)}))} onClose={()=>setEditSt(null)}/></div>}
+      {editSt&&<div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"><StudentProfileModal student={editSt} state={state} onSave={u=>{setState(s=>({...s,students:s.students.map(x=>x.id===u.id?u:x)}));try{sb.update("students",u.id,{name:u.name,roll_no:u.rollNo,class_id:u.classId,photo:u.photo??null,profile:u.profile??null});}catch{}}} onClose={()=>setEditSt(null)}/></div>}
+      {editSelf&&<div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"><TeacherProfileModal teacher={teacher} state={state} onSave={u=>{setState(s=>({...s,teachers:s.teachers.map(x=>x.id===u.id?u:x)}));try{sb.update("teachers",u.id,{name:u.name,email:u.email,photo:u.photo??null,profile:u.profile??null});}catch{}}} onClose={()=>setEditSelf(false)}/></div>}
     </Layout>
   );
 }
 // ═══════════════════════════════════════════════════════════════════════════════
-function StudentView({user,state,onLogout}:
-  {user:LoggedInUser;state:AppState;onLogout:()=>void}) {
+function StudentView({user,state,setState,onLogout}:
+  {user:LoggedInUser;state:AppState;setState:(fn:(s:AppState)=>AppState)=>void;onLogout:()=>void}) {
 
-  const [tab,setTab]   = useState("dashboard");
-  const _student       = state.students.find(s=>s.id===user.id);
+  const [tab,setTab]     = useState("dashboard");
+  const [editSelf,setEditSelf] = useState(false);
+  const _student         = state.students.find(s=>s.id===user.id);
 
   // State still loading from Supabase — student not hydrated yet
   if(!_student) return(
@@ -2160,12 +2203,13 @@ function StudentView({user,state,onLogout}:
         <div className="space-y-6 max-w-2xl">
           <div className="bg-gradient-to-br from-blue-600/20 to-purple-600/10 border border-blue-500/20 rounded-2xl p-6">
             <div className="flex items-center gap-4">
-              <img src={student.photo} className="w-16 h-16 rounded-2xl border-2 border-blue-500/30"/>
-              <div>
+              <img src={student.photo} className="w-16 h-16 rounded-2xl border-2 border-blue-500/30 object-cover"/>
+              <div className="flex-1">
                 <p className="text-white/50 text-xs mb-1">Welcome back</p>
                 <h2 className="text-xl font-bold text-white">{student.name}</h2>
                 <p className="text-white/40 text-sm">Class {myClass?.name}-{myClass?.section} · Roll: <span className="font-mono text-blue-400">{student.rollNo}</span></p>
               </div>
+              <button onClick={()=>setEditSelf(true)} className="flex items-center gap-1.5 text-xs border border-white/10 text-white/40 hover:text-blue-400 hover:border-blue-500/30 px-3 py-1.5 rounded-lg transition-colors flex-shrink-0"><Edit2 size={12}/>Edit</button>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-4">
@@ -2314,6 +2358,7 @@ function StudentView({user,state,onLogout}:
   return(
     <Layout user={user} state={state} navItems={NAV} activeTab={tab} setTab={setTab} onLogout={onLogout}>
       {renderTab()}
+      {editSelf&&<div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"><StudentProfileModal student={student} state={state} onSave={u=>{setState(s=>({...s,students:s.students.map(x=>x.id===u.id?u:x)}));try{sb.update("students",u.id,{name:u.name,roll_no:u.rollNo,class_id:u.classId,photo:u.photo??null,profile:u.profile??null});}catch{}}} onClose={()=>setEditSelf(false)}/></div>}
     </Layout>
   );
 }
@@ -4710,6 +4755,7 @@ export default function SchoolERP() {
     return { id: r.id, name: r.name, email: r.email, subjectIds: r.subject_ids || [],
       classIds: r.class_ids || [], password: r.password || "changeme",
       status: r.status || undefined,
+      photo: r.photo || undefined,
       profile };
   }
   function dbToItem(r: any): InventoryItem {
@@ -4774,6 +4820,7 @@ export default function SchoolERP() {
       try { await sb.update("teachers", t.id, {
         name: t.name, email: t.email, subject_ids: t.subjectIds,
         class_ids: t.classIds, password: t.password, profile: t.profile ?? null,
+        photo: t.photo ?? null,
       }); } catch(e) { console.warn("[db.updateTeacher]", e); }
     },
     async deleteTeacher(id) {
@@ -4908,7 +4955,7 @@ export default function SchoolERP() {
         {(user.role==="admin")         &&<AdminView   user={user} state={state} setState={update} db={db} onLogout={()=>{try{localStorage.removeItem(SESSION_KEY);localStorage.removeItem(SESSION_EXPIRY);localStorage.removeItem(SESSION_DASH);}catch{}setUser(null);setInDash(false);}}/>}
         {(user.role==="support_admin") &&<AdminView   user={user} state={state} setState={update} db={db} onLogout={()=>{try{localStorage.removeItem(SESSION_KEY);localStorage.removeItem(SESSION_EXPIRY);localStorage.removeItem(SESSION_DASH);}catch{}setUser(null);setInDash(false);}} isSA/>}
         {user.role==="teacher"         &&<TeacherView user={user} state={state} setState={update} onLogout={()=>{try{localStorage.removeItem(SESSION_KEY);localStorage.removeItem(SESSION_EXPIRY);localStorage.removeItem(SESSION_DASH);}catch{}setUser(null);setInDash(false);}}/>}
-        {user.role==="student"         &&<StudentView user={user} state={state} onLogout={()=>{try{localStorage.removeItem(SESSION_KEY);localStorage.removeItem(SESSION_EXPIRY);localStorage.removeItem(SESSION_DASH);}catch{}setUser(null);setInDash(false);}}/>}
+        {user.role==="student"         &&<StudentView user={user} state={state} setState={update} onLogout={()=>{try{localStorage.removeItem(SESSION_KEY);localStorage.removeItem(SESSION_EXPIRY);localStorage.removeItem(SESSION_DASH);}catch{}setUser(null);setInDash(false);}}/>}
       </>
     );
   }
