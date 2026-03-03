@@ -4566,119 +4566,119 @@ export default function SchoolERP() {
     // Students
     async addStudent(s) {
       update(st => ({ ...st, students: [...st.students, s] }));
-      await sb.upsert("students", {
+      try { await sb.upsert("students", {
         id: s.id, name: s.name, roll_no: s.rollNo, class_id: s.classId,
         photo: s.photo, marks: s.marks, password: s.password, profile: s.profile ?? null,
-      });
+      }); } catch(e) { console.warn("[db.addStudent]", e); }
     },
     async updateStudent(s) {
       update(st => ({ ...st, students: st.students.map(x => x.id === s.id ? s : x) }));
-      await sb.update("students", s.id, {
+      try { await sb.update("students", s.id, {
         name: s.name, roll_no: s.rollNo, class_id: s.classId,
         photo: s.photo, marks: s.marks, password: s.password, profile: s.profile ?? null,
-      });
+      }); } catch(e) { console.warn("[db.updateStudent]", e); }
     },
     async deleteStudent(id) {
       update(st => ({ ...st, students: st.students.filter(x => x.id !== id) }));
-      await sb.delete("students", id);
+      try { await sb.delete("students", id); } catch(e) { console.warn("[db.deleteStudent]", e); }
     },
 
     // Teachers
     async addTeacher(t) {
       update(st => ({ ...st, teachers: [...st.teachers, t] }));
-      await sb.upsert("teachers", {
+      try { await sb.upsert("teachers", {
         id: t.id, name: t.name, email: t.email, subject_ids: t.subjectIds,
         class_ids: t.classIds, password: t.password, profile: t.profile ?? null,
-      });
+      }); } catch(e) { console.warn("[db.addTeacher]", e); }
     },
     async updateTeacher(t) {
       update(st => ({ ...st, teachers: st.teachers.map(x => x.id === t.id ? t : x) }));
-      await sb.update("teachers", t.id, {
+      try { await sb.update("teachers", t.id, {
         name: t.name, email: t.email, subject_ids: t.subjectIds,
         class_ids: t.classIds, password: t.password, profile: t.profile ?? null,
-      });
+      }); } catch(e) { console.warn("[db.updateTeacher]", e); }
     },
     async deleteTeacher(id) {
       update(st => ({ ...st, teachers: st.teachers.filter(x => x.id !== id) }));
-      await sb.delete("teachers", id);
+      try { await sb.delete("teachers", id); } catch(e) { console.warn("[db.deleteTeacher]", e); }
     },
 
     // Inventory items
     async addItem(i) {
       update(st => ({ ...st, inventory: { ...st.inventory, items: [...st.inventory.items, i] } }));
-      await sb.upsert("inventory_items", {
+      try { await sb.upsert("inventory_items", {
         id: i.id, name: i.name, category: i.category, quantity: i.quantity,
         unit: i.unit, condition: i.condition, location: i.location,
         last_checked: i.lastChecked, note: i.note ?? null, lab_id: i.labId ?? null,
-      });
+      }); } catch(e) { console.warn("[db.addItem]", e); }
     },
     async updateItem(i) {
       update(st => ({ ...st, inventory: { ...st.inventory, items: st.inventory.items.map(x => x.id === i.id ? i : x) } }));
-      await sb.update("inventory_items", i.id, {
+      try { await sb.update("inventory_items", i.id, {
         name: i.name, category: i.category, quantity: i.quantity,
         unit: i.unit, condition: i.condition, location: i.location,
         last_checked: i.lastChecked, note: i.note ?? null, lab_id: i.labId ?? null,
-      });
+      }); } catch(e) { console.warn("[db.updateItem]", e); }
     },
     async deleteItem(id) {
       update(st => ({ ...st, inventory: { ...st.inventory, items: st.inventory.items.filter(x => x.id !== id) } }));
-      await sb.delete("inventory_items", id);
+      try { await sb.delete("inventory_items", id); } catch(e) { console.warn("[db.deleteItem]", e); }
     },
 
     // Labs
     async addLab(l) {
       update(st => ({ ...st, inventory: { ...st.inventory, labs: [...st.inventory.labs, l] } }));
-      await sb.upsert("labs", { id: l.id, name: l.name, icon: l.icon, password: l.password, description: l.description, color: l.color });
+      try { await sb.upsert("labs", { id: l.id, name: l.name, icon: l.icon, password: l.password, description: l.description, color: l.color }); } catch(e) { console.warn("[db.addLab]", e); }
     },
     async updateLab(l) {
       update(st => ({ ...st, inventory: { ...st.inventory, labs: st.inventory.labs.map(x => x.id === l.id ? l : x) } }));
-      await sb.update("labs", l.id, { name: l.name, icon: l.icon, password: l.password, description: l.description, color: l.color });
+      try { await sb.update("labs", l.id, { name: l.name, icon: l.icon, password: l.password, description: l.description, color: l.color }); } catch(e) { console.warn("[db.updateLab]", e); }
     },
     async deleteLab(id) {
       update(st => ({ ...st, inventory: { ...st.inventory, labs: st.inventory.labs.filter(x => x.id !== id), items: st.inventory.items.filter(x => x.labId !== id) } }));
-      await sb.delete("labs", id);
+      try { await sb.delete("labs", id); } catch(e) { console.warn("[db.deleteLab]", e); }
     },
 
     // Fees
     async addFee(f) {
       update(st => ({ ...st, fees: { records: [...st.fees.records, f] } }));
-      await sb.upsert("fees", {
+      try { await sb.upsert("fees", {
         id: f.id, student_id: f.studentId, category: f.category, label: f.label,
         amount: f.amount, due_date: f.dueDate, status: f.status,
         paid_date: f.paidDate ?? null, paid_amount: f.paidAmount ?? null, note: f.note ?? null,
-      });
+      }); } catch(e) { console.warn("[db.addFee]", e); }
     },
     async updateFee(f) {
       update(st => ({ ...st, fees: { records: st.fees.records.map(x => x.id === f.id ? f : x) } }));
-      await sb.update("fees", f.id, {
+      try { await sb.update("fees", f.id, {
         status: f.status, paid_date: f.paidDate ?? null,
         paid_amount: f.paidAmount ?? null, note: f.note ?? null,
-      });
+      }); } catch(e) { console.warn("[db.updateFee]", e); }
     },
     async deleteFee(id) {
       update(st => ({ ...st, fees: { records: st.fees.records.filter(x => x.id !== id) } }));
-      await sb.delete("fees", id);
+      try { await sb.delete("fees", id); } catch(e) { console.warn("[db.deleteFee]", e); }
     },
 
     // Behavior
     async addBehavior(b) {
       update(st => ({ ...st, behavior: { records: [...st.behavior.records, b] } }));
-      await sb.upsert("behavior", {
+      try { await sb.upsert("behavior", {
         id: b.id, student_id: b.studentId, date: b.date, type: b.type,
         severity: b.severity, category: b.category, description: b.description,
         action_taken: b.actionTaken, status: b.status, reported_by: b.reportedBy,
-      });
+      }); } catch(e) { console.warn("[db.addBehavior]", e); }
     },
     async updateBehavior(b) {
       update(st => ({ ...st, behavior: { records: st.behavior.records.map(x => x.id === b.id ? b : x) } }));
-      await sb.update("behavior", b.id, {
+      try { await sb.update("behavior", b.id, {
         severity: b.severity, category: b.category, description: b.description,
         action_taken: b.actionTaken, status: b.status,
-      });
+      }); } catch(e) { console.warn("[db.updateBehavior]", e); }
     },
     async deleteBehavior(id) {
       update(st => ({ ...st, behavior: { records: st.behavior.records.filter(x => x.id !== id) } }));
-      await sb.delete("behavior", id);
+      try { await sb.delete("behavior", id); } catch(e) { console.warn("[db.deleteBehavior]", e); }
     },
 
     // Counseling
@@ -4689,10 +4689,10 @@ export default function SchoolERP() {
           ? st.counseling.profiles.map(x => x.studentId === p.studentId ? p : x)
           : [...st.counseling.profiles, p] }};
       });
-      await sb.upsert("counseling_profiles", {
+      try { await sb.upsert("counseling_profiles", {
         student_id: p.studentId, background: p.background,
         sessions: p.sessions, flags: p.flags,
-      });
+      }); } catch(e) { console.warn("[db.saveCounselingProfile]", e); }
     },
   };
 
