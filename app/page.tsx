@@ -15,6 +15,26 @@ import {
 // ─── Supabase Client ──────────────────────────────────────────────────────────
 // Replace these with your actual Supabase project URL and anon key.
 // You can find them in: Supabase Dashboard → Settings → API
+//
+// ─── REQUIRED SUPABASE TABLES ───────────────────────────────────────────────
+// Run this SQL in your Supabase SQL editor (Dashboard → SQL Editor → New Query):
+//
+// create table if not exists subjects (
+//   id text primary key, name text, code text,
+//   class_ids jsonb default '[]', teacher_id text
+// );
+// create table if not exists classes (
+//   id text primary key, name text, section text, teacher_id text
+// );
+// create table if not exists timetable (
+//   id text primary key, class_id text, day text,
+//   period int, subject_id text, teacher_id text
+// );
+//
+// Also add these policies in Authentication → Policies for each new table:
+//   Enable read for all users (anon)
+//   Enable insert/update/delete for authenticated or use service role key
+// ────────────────────────────────────────────────────────────────────────────
 const SUPABASE_URL  = process.env.NEXT_PUBLIC_SUPABASE_URL  || "";
 const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
@@ -1239,6 +1259,7 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
   }
   function importTimetableCSV(text:string){
     const rows=parseCSV(text); let count=0;
+    const toSync: any[]=[];
     rows.forEach(r=>{
       const cls=state.classes.find(c=>c.name===r.class&&c.section===r.section);
       const sub=state.subjects.find(s=>s.code===r.subject_code||s.name.toLowerCase()===r.subject?.toLowerCase());
@@ -1246,9 +1267,12 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
       const period=parseInt(r.period);
       if(cls&&sub&&r.day&&!isNaN(period)){
         count++;
+        const id=uid();
+        toSync.push({id,class_id:cls.id,day:r.day,period,subject_id:sub.id,teacher_id:tch?.id||null});
         upd(s=>({...s,timetable:{...s.timetable,[cls.id]:[...(s.timetable[cls.id]||[]).filter(x=>!(x.day===r.day&&x.period===period)),{day:r.day,period,subjectId:sub.id,teacherId:tch?.id||""}]}}));
       }
     });
+    toSync.forEach(row=>{ try{sb.upsert("timetable",row);}catch{} });
     setCsvMsg(count?`✓ Imported ${count} timetable slots`:"No valid rows. Required: class,section,day,period,subject_code");
   }
 
@@ -1457,7 +1481,7 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
                 <div key={cls.id} className="bg-[#080D18] border border-white/5 rounded-xl p-5 hover:border-blue-500/30 transition-all">
                   <div className="flex items-start justify-between mb-4">
                     <div className="w-12 h-12 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center"><span className="text-base font-bold text-blue-400">{cls.name}{cls.section}</span></div>
-                    {!isSA&&<button onClick={()=>upd(s=>({...s,classes:s.classes.filter(c=>c.id!==cls.id)}))} className="text-white/20 hover:text-red-400 transition-colors"><Trash2 size={14}/></button>}
+                    {!isSA&&<button onClick={async()=>{upd(s=>({...s,classes:s.classes.filter(c=>c.id!==cls.id)}));try{await sb.delete("classes",cls.id);}catch(e){console.warn("[sb.classes delete]",e);}}} className="text-white/20 hover:text-red-400 transition-colors"><Trash2 size={14}/></button>}
                   </div>
                   <div className="text-white font-semibold">Class {cls.name} – {cls.section}</div>
                   <div className="text-xs text-white/40 mt-1">Class Teacher: {teacher?.name||"Unassigned"}</div>
@@ -1490,7 +1514,7 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
                     <td className="px-4 py-3 text-sm text-white">{sub.name}</td>
                     <td className="px-4 py-3"><div className="flex gap-1 flex-wrap">{classes.map(c=><span key={c.id} className="text-xs bg-white/5 text-white/50 px-2 py-0.5 rounded">{c.name}-{c.section}</span>)}</div></td>
                     <td className="px-4 py-3 text-sm text-white/60">{teacher?.name||"–"}</td>
-                    <td className="px-4 py-3"><button onClick={()=>upd(s=>({...s,subjects:s.subjects.filter(x=>x.id!==sub.id)}))} className="text-white/20 hover:text-red-400 transition-colors"><Trash2 size={14}/></button></td>
+                    <td className="px-4 py-3"><button onClick={async()=>{upd(s=>({...s,subjects:s.subjects.filter(x=>x.id!==sub.id)}));try{await sb.delete("subjects",sub.id);}catch(e){console.warn("[sb.subjects delete]",e);}}} className="text-white/20 hover:text-red-400 transition-colors"><Trash2 size={14}/></button></td>
                   </tr>
                 );
               })}</tbody>
@@ -1597,10 +1621,18 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
           <div className="bg-[#080D18] border border-white/5 rounded-xl overflow-hidden">
             <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between">
               <span className="text-sm text-white/60">{state.subjects.find(s=>s.id===ss)?.name}</span>
-              <button onClick={()=>{
+              <button onClick={async()=>{
                 const upds:Record<string,number>={};
                 Object.entries(me).forEach(([id,v])=>{const n=parseFloat(v);if(!isNaN(n))upds[id]=n;});
-                upd(s=>({...s,students:s.students.map(st=>upds[st.id]!==undefined?{...st,marks:{...st.marks,[ss]:upds[st.id]}}:st)}));
+                // Get current marks before update for merge
+                upd(s=>{
+                  const updated=s.students.map(st=>upds[st.id]!==undefined?{...st,marks:{...st.marks,[ss]:upds[st.id]}}:st);
+                  // Sync each updated student's marks to Supabase
+                  updated.filter(st=>upds[st.id]!==undefined).forEach(st=>{
+                    try{sb.update("students",st.id,{marks:st.marks});}catch{}
+                  });
+                  return {...s,students:updated};
+                });
                 setME({});
               }} className="flex items-center gap-2 text-xs bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 px-3 py-1.5 rounded-lg hover:bg-emerald-500/30 transition-colors"><Save size={12}/>Save All</button>
             </div>
@@ -1655,7 +1687,7 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
                           <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg px-3 py-2 group relative">
                             <div className="text-xs font-semibold text-blue-300">{sub.code}</div>
                             <div className="text-xs text-white/40 truncate max-w-[80px]">{tea?.name?.split(" ")[0]}</div>
-                            <button onClick={()=>upd(s=>({...s,timetable:{...s.timetable,[sc]:(s.timetable[sc]||[]).filter(x=>!(x.day===d&&x.period===p))}}))} className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 text-red-400/60 hover:text-red-400 transition-all"><X size={10}/></button>
+                            <button onClick={async()=>{upd(s=>({...s,timetable:{...s.timetable,[sc]:(s.timetable[sc]||[]).filter(x=>!(x.day===d&&x.period===p))}}));try{const rows=await sb.select<any>("timetable",`class_id=eq.${sc}&day=eq.${encodeURIComponent(d)}&period=eq.${p}`);if(rows[0])await sb.delete("timetable",rows[0].id);}catch(e){console.warn("[sb.timetable delete]",e);}}} className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 text-red-400/60 hover:text-red-400 transition-all"><X size={10}/></button>
                           </div>
                         ):(
                           <button onClick={()=>setPopup({type:"addSlot",data:{day:d,period:p,classId:sc}})} className="w-full h-12 border border-dashed border-white/10 rounded-lg hover:border-blue-500/30 hover:bg-blue-500/5 transition-all flex items-center justify-center">
@@ -1755,11 +1787,11 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
   function renderPopup(){
     if(!popup)return null;
     const close=()=>setPopup(null);
-    if(popup.type==="addClass"){let n="",sec="",tid="";return<Modal title="Add Class" onClose={close}><Field label="Class Name" onChange={v=>n=v}/><Field label="Section" onChange={v=>sec=v}/><SelField label="Class Teacher" options={state.teachers.map(t=>({value:t.id,label:t.name}))} onChange={v=>tid=v}/><MBtn onClick={()=>{if(n&&sec){upd(s=>({...s,classes:[...s.classes,{id:uid(),name:n,section:sec,teacherId:tid}]}));close();}}}>Create</MBtn></Modal>;}
-    if(popup.type==="addSubject"){let n="",code="",tid="";let cids:string[]=[];return<Modal title="Add Subject" onClose={close}><Field label="Subject Name" onChange={v=>n=v}/><Field label="Code" onChange={v=>code=v.toUpperCase()}/><SelField label="Teacher" options={state.teachers.map(t=>({value:t.id,label:t.name}))} onChange={v=>tid=v}/><div><label className="text-xs text-white/40 uppercase block mb-2">Classes</label><div className="flex gap-3 flex-wrap">{state.classes.map(c=><label key={c.id} className="flex items-center gap-1.5 text-sm text-white cursor-pointer"><input type="checkbox" className="accent-blue-500" onChange={e=>{if(e.target.checked)cids.push(c.id);else cids=cids.filter(x=>x!==c.id);}}/>{c.name}-{c.section}</label>)}</div></div><MBtn onClick={()=>{if(n&&code){upd(s=>({...s,subjects:[...s.subjects,{id:uid(),name:n,code,classIds:cids,teacherId:tid}]}));close();}}}>Create</MBtn></Modal>;}
+    if(popup.type==="addClass"){let n="",sec="",tid="";return<Modal title="Add Class" onClose={close}><Field label="Class Name" onChange={v=>n=v}/><Field label="Section" onChange={v=>sec=v}/><SelField label="Class Teacher" options={state.teachers.map(t=>({value:t.id,label:t.name}))} onChange={v=>tid=v}/><MBtn onClick={async()=>{if(n&&sec){const id=uid();upd(s=>({...s,classes:[...s.classes,{id,name:n,section:sec,teacherId:tid}]}));try{await sb.upsert("classes",{id,name:n,section:sec,teacher_id:tid||null});}catch(e){console.warn("[sb.classes]",e);}close();}}}>Create</MBtn></Modal>;}
+    if(popup.type==="addSubject"){let n="",code="",tid="";let cids:string[]=[];return<Modal title="Add Subject" onClose={close}><Field label="Subject Name" onChange={v=>n=v}/><Field label="Code" onChange={v=>code=v.toUpperCase()}/><SelField label="Teacher" options={state.teachers.map(t=>({value:t.id,label:t.name}))} onChange={v=>tid=v}/><div><label className="text-xs text-white/40 uppercase block mb-2">Classes</label><div className="flex gap-3 flex-wrap">{state.classes.map(c=><label key={c.id} className="flex items-center gap-1.5 text-sm text-white cursor-pointer"><input type="checkbox" className="accent-blue-500" onChange={e=>{if(e.target.checked)cids.push(c.id);else cids=cids.filter(x=>x!==c.id);}}/>{c.name}-{c.section}</label>)}</div></div><MBtn onClick={async()=>{if(n&&code){const id=uid();upd(s=>({...s,subjects:[...s.subjects,{id,name:n,code,classIds:cids,teacherId:tid}]}));try{await sb.upsert("subjects",{id,name:n,code,class_ids:cids,teacher_id:tid||null});}catch(e){console.warn("[sb.subjects]",e);}close();}}}>Create</MBtn></Modal>;}
     if(popup.type==="addTeacher"){let n="",e="",p="";return<Modal title="Add Teacher" onClose={close}><Field label="Full Name" onChange={v=>n=v}/><Field label="Email" onChange={v=>e=v}/><Field label="Password" onChange={v=>p=v}/><MBtn onClick={()=>{if(n&&e){const t:Teacher={id:uid(),name:n,email:e,subjectIds:[],classIds:[],password:p};db.addTeacher(t);close();}}}>Add</MBtn></Modal>;}
     if(popup.type==="addStudent"){let n="",r="",cid=state.classes[0]?.id||"",p="";return<Modal title="Add Student" onClose={close}><Field label="Full Name" onChange={v=>n=v}/><Field label="Roll Number" onChange={v=>r=v}/><Field label="Password" onChange={v=>p=v}/><SelField label="Class" options={state.classes.map(c=>({value:c.id,label:`Class ${c.name}-${c.section}`}))} onChange={v=>cid=v}/><MBtn onClick={()=>{if(n&&r){const s:Student={id:uid(),name:n,rollNo:r,classId:cid,photo:`https://api.dicebear.com/7.x/avataaars/svg?seed=${n}`,marks:{},password:p};db.addStudent(s);close();}}}>Add</MBtn></Modal>;}
-    if(popup.type==="addSlot"){const{day,period,classId}=popup.data;let sid="",tid="";const csubs=state.subjects.filter(s=>s.classIds.includes(classId));return<Modal title={`Slot — ${day}, P${period}`} onClose={close}><SelField label="Subject" options={csubs.map(s=>({value:s.id,label:s.name}))} onChange={v=>sid=v}/><SelField label="Teacher" options={state.teachers.map(t=>({value:t.id,label:t.name}))} onChange={v=>tid=v}/><MBtn onClick={()=>{if(sid){upd(s=>({...s,timetable:{...s.timetable,[classId]:[...(s.timetable[classId]||[]),{day,period,subjectId:sid,teacherId:tid}]}}));close();}}}>Add</MBtn></Modal>;}
+    if(popup.type==="addSlot"){const{day,period,classId}=popup.data;let sid="",tid="";const csubs=state.subjects.filter(s=>s.classIds.includes(classId));return<Modal title={`Slot — ${day}, P${period}`} onClose={close}><SelField label="Subject" options={csubs.map(s=>({value:s.id,label:s.name}))} onChange={v=>sid=v}/><SelField label="Teacher" options={state.teachers.map(t=>({value:t.id,label:t.name}))} onChange={v=>tid=v}/><MBtn onClick={async()=>{if(sid){const id=uid();upd(s=>({...s,timetable:{...s.timetable,[classId]:[...(s.timetable[classId]||[]),{day,period,subjectId:sid,teacherId:tid}]}}));try{await sb.upsert("timetable",{id,class_id:classId,day,period,subject_id:sid,teacher_id:tid||null});}catch(e){console.warn("[sb.timetable]",e);}close();}}}>Add</MBtn></Modal>;}
     if(popup.type==="addSupportAdmin"){let n="",e="",p="";return<Modal title="Add Support Admin" onClose={close}><Field label="Full Name" onChange={v=>n=v}/><Field label="Email" onChange={v=>e=v}/><Field label="Password" onChange={v=>p=v}/><MBtn onClick={()=>{if(n&&e&&p){upd(s=>({...s,supportAdmins:[...s.supportAdmins,{id:uid(),name:n,email:e,password:p}]}));close();}}}>Create</MBtn></Modal>;}
     return null;
   }
@@ -1885,7 +1917,13 @@ function TeacherView({user,state,setState,onLogout}:
                 <button onClick={()=>{
                   const upds:Record<string,number>={};
                   Object.entries(me).forEach(([id,v])=>{const n=parseFloat(v);if(!isNaN(n))upds[id]=n;});
-                  setState(s=>({...s,students:s.students.map(st=>upds[st.id]!==undefined?{...st,marks:{...st.marks,[ss]:upds[st.id]}}:st)}));
+                  setState(s=>{
+                    const updated=s.students.map(st=>upds[st.id]!==undefined?{...st,marks:{...st.marks,[ss]:upds[st.id]}}:st);
+                    updated.filter(st=>upds[st.id]!==undefined).forEach(st=>{
+                      try{sb.update("students",st.id,{marks:st.marks});}catch{}
+                    });
+                    return {...s,students:updated};
+                  });
                   setME({});
                 }} className="flex items-center gap-2 text-xs bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 px-3 py-1.5 rounded-lg hover:bg-emerald-500/30 transition-colors"><Save size={12}/>Save All</button>
               </div>
@@ -4590,19 +4628,33 @@ export default function SchoolERP() {
       sb.select<any>("fees"),
       sb.select<any>("behavior"),
       sb.select<any>("counseling_profiles"),
-    ]).then(([students, teachers, items, labs, fees, behavior, counseling]) => {
-      update(prev => ({
-        ...prev,
-        students:  students.length  ? students.map(dbToStudent)  : prev.students,
-        teachers:  teachers.length  ? teachers.map(dbToTeacher)  : prev.teachers,
-        inventory: {
-          labs:  labs.length  ? labs.map(dbToLab)   : prev.inventory.labs,
-          items: items.length ? items.map(dbToItem)  : prev.inventory.items,
-        },
-        fees:     { records: fees.length     ? fees.map(dbToFee)              : prev.fees.records },
-        behavior: { records: behavior.length ? behavior.map(dbToBehavior)     : prev.behavior.records },
-        counseling:{ profiles: counseling.length ? counseling.map(dbToCounselingProfile) : prev.counseling.profiles },
-      }));
+      sb.select<any>("subjects"),
+      sb.select<any>("classes"),
+      sb.select<any>("timetable"),
+    ]).then(([students, teachers, items, labs, fees, behavior, counseling, subjects, classes, timetable]) => {
+      update(prev => {
+        // Build timetable map from flat rows
+        const ttMap: Record<string,any[]> = {};
+        timetable.forEach((r:any) => {
+          if (!ttMap[r.class_id]) ttMap[r.class_id] = [];
+          ttMap[r.class_id].push({ day: r.day, period: r.period, subjectId: r.subject_id, teacherId: r.teacher_id });
+        });
+        return {
+          ...prev,
+          students:  students.length  ? students.map(dbToStudent)  : prev.students,
+          teachers:  teachers.length  ? teachers.map(dbToTeacher)  : prev.teachers,
+          subjects:  subjects.length  ? subjects.map((r:any) => ({ id:r.id, name:r.name, code:r.code, classIds:r.class_ids||[], teacherId:r.teacher_id||"" })) : prev.subjects,
+          classes:   classes.length   ? classes.map((r:any)  => ({ id:r.id, name:r.name, section:r.section, teacherId:r.teacher_id||"" }))  : prev.classes,
+          timetable: timetable.length ? ttMap : prev.timetable,
+          inventory: {
+            labs:  labs.length  ? labs.map(dbToLab)   : prev.inventory.labs,
+            items: items.length ? items.map(dbToItem)  : prev.inventory.items,
+          },
+          fees:      { records: fees.length     ? fees.map(dbToFee)                       : prev.fees.records },
+          behavior:  { records: behavior.length ? behavior.map(dbToBehavior)              : prev.behavior.records },
+          counseling:{ profiles: counseling.length ? counseling.map(dbToCounselingProfile) : prev.counseling.profiles },
+        };
+      });
       setDbStatus("ok");
     }).catch(() => setDbStatus("offline"));
   }, []);
