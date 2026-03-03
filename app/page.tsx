@@ -1758,10 +1758,22 @@ function TeacherView({user,state,setState,onLogout}:
   const [shCls,setShCls]   = useState(""); // ✅ Marksheet class
   const [editSt,setEditSt] = useState<Student|null>(null); // ✅ Profile edit (class teachers)
 
-  const teacher    = state.teachers.find(t=>t.id===user.id)!;
+  const _teacher   = state.teachers.find(t=>t.id===user.id);
+
+  // State still loading from Supabase — teacher not hydrated yet
+  if(!_teacher) return(
+    <div className="min-h-screen bg-[#05080F] flex items-center justify-center font-mono">
+      <div className="text-center space-y-4">
+        <div className="w-10 h-10 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin mx-auto"/>
+        <p className="text-white/30 text-sm">Loading your profile…</p>
+      </div>
+    </div>
+  );
+
+  const teacher    = _teacher;  // narrowed: definitely Teacher after guard
   const mySubjects = state.subjects.filter(s=>teacher.subjectIds.includes(s.id));
   const myClasses  = state.classes.filter(c=>teacher.classIds.includes(c.id));
-  const myOwnCls   = state.classes.filter(c=>c.teacherId===teacher.id); // classes where I am class teacher
+  const myOwnCls   = state.classes.filter(c=>c.teacherId===teacher.id);
 
   const NAV=[
     {id:"profile",    label:"My Profile",     icon:User},
@@ -2012,8 +2024,20 @@ function StudentView({user,state,onLogout}:
   {user:LoggedInUser;state:AppState;onLogout:()=>void}) {
 
   const [tab,setTab]   = useState("dashboard");
-  const student        = state.students.find(s=>s.id===user.id)!;
-  const myClass        = state.classes.find(c=>c.id===student.classId)!;
+  const _student       = state.students.find(s=>s.id===user.id);
+
+  // State still loading from Supabase — student not hydrated yet
+  if(!_student) return(
+    <div className="min-h-screen bg-[#05080F] flex items-center justify-center font-mono">
+      <div className="text-center space-y-4">
+        <div className="w-10 h-10 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin mx-auto"/>
+        <p className="text-white/30 text-sm">Loading your profile…</p>
+      </div>
+    </div>
+  );
+
+  const student        = _student;  // narrowed: definitely Student after guard
+  const myClass        = state.classes.find(c=>c.id===student.classId);
   const mySubjects     = state.subjects.filter(s=>s.classIds.includes(student.classId));
 
   const NAV=[
