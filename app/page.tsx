@@ -9,7 +9,7 @@ import {
   Upload, UserPlus, Phone, Printer,
   Globe, Image, Newspaper, Star, Users2, MapPin, Calendar, Tag, Edit2, ExternalLink, ChevronLeft, ChevronDown, PlayCircle,
   HeartHandshake, DollarSign, Package, KeyRound, CreditCard, Boxes, ClipboardList, AlertTriangle, Database, Wifi, WifiOff,
-  Menu
+  Menu, ClipboardCheck
 } from "lucide-react";
 
 // ─── Supabase Client ──────────────────────────────────────────────────────────
@@ -954,7 +954,7 @@ function LoginScreen({state,db,onLogin,onRegister,onBack}:{state:AppState;db:DbO
 // LAYOUT
 // ═══════════════════════════════════════════════════════════════════════════════
 function Layout({user,state,children,navItems,activeTab,setTab,onLogout}:
-  {user:LoggedInUser;state:AppState;children:React.ReactNode;navItems:{id:string;label:string;icon:any}[];activeTab:string;setTab:(t:string)=>void;onLogout:()=>void}) {
+  {user:LoggedInUser;state:AppState;children:React.ReactNode;navItems:{id:string;label:string;icon:any;badge?:number}[];activeTab:string;setTab:(t:string)=>void;onLogout:()=>void}) {
 
   // Desktop: collapsed (icon-only) vs expanded
   const [open,setOpen]         = useState(true);
@@ -1017,8 +1017,20 @@ function Layout({user,state,children,navItems,activeTab,setTab,onLogout}:
               <button key={n.id}
                 onClick={()=>handleNavClick(n.id)}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-left ${active?"bg-blue-600/20 text-blue-300 border border-blue-500/20":"text-white/40 hover:text-white/70 hover:bg-white/5"}`}>
-                <n.icon size={15} className="flex-shrink-0"/>
-                {showLabels&&<span className="text-xs font-medium truncate">{n.label}</span>}
+                <div className="relative flex-shrink-0">
+                  <n.icon size={15}/>
+                  {(n.badge??0)>0&&(
+                    <span className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 bg-amber-500 rounded-full text-[8px] text-white font-bold flex items-center justify-center leading-none">
+                      {(n.badge??0)>9?"9+":n.badge}
+                    </span>
+                  )}
+                </div>
+                {showLabels&&<span className="text-xs font-medium truncate flex-1">{n.label}</span>}
+                {showLabels&&(n.badge??0)>0&&(
+                  <span className="ml-auto bg-amber-500/20 text-amber-400 border border-amber-500/30 text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0">
+                    {n.badge}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -1133,8 +1145,12 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
   const [editTch,setEditTch]   = useState<Teacher|null>(null);
   const upd = setState;
 
+  const pendingCount = state.students.filter(s=>s.status==="pending").length
+                     + state.teachers.filter(t=>t.status==="pending").length;
+
   const NAV=[
     {id:"dashboard",        label:"Dashboard",        icon:Grid3X3},
+    {id:"approvals",        label:"Approvals",        icon:ClipboardCheck, badge:pendingCount},
     {id:"classes",          label:"Classes",          icon:School},
     {id:"subjects",         label:"Subjects",         icon:BookOpen},
     {id:"teachers",         label:"Teachers",         icon:GraduationCap},
@@ -1301,6 +1317,78 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
           </div>
         </div>
       );
+
+      case "approvals": {
+        const pendingS=state.students.filter(s=>s.status==="pending");
+        const pendingT=state.teachers.filter(t=>t.status==="pending");
+        const all=[
+          ...pendingT.map(t=>({...t,_role:"Teacher" as const,_id:t.email})),
+          ...pendingS.map(s=>({...s,_role:"Student" as const,_id:s.rollNo})),
+        ];
+        return(
+          <div className="space-y-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-white">Pending Approvals</h2>
+                <p className="text-white/30 text-xs mt-0.5">Review and approve new registration requests.</p>
+              </div>
+              {all.length>0&&(
+                <span className="bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-bold px-3 py-1.5 rounded-full">
+                  {all.length} pending
+                </span>
+              )}
+            </div>
+            {all.length===0?(
+              <div className="bg-[#080D18] border border-white/5 rounded-2xl p-12 text-center">
+                <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mx-auto mb-4">
+                  <Check size={24} className="text-emerald-400"/>
+                </div>
+                <div className="text-white font-semibold mb-1">All clear!</div>
+                <div className="text-white/30 text-sm">No pending registration requests.</div>
+              </div>
+            ):(
+              <div className="space-y-3">
+                {all.map(u=>(
+                  <div key={u.id} className="bg-[#080D18] border border-white/5 rounded-2xl p-4 flex items-center gap-4">
+                    <img
+                      src={"photo" in u?u.photo:`https://api.dicebear.com/7.x/avataaars/svg?seed=${u.name}`}
+                      className="w-12 h-12 rounded-full flex-shrink-0 bg-white/5"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-semibold text-white">{u.name}</div>
+                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full border font-medium ${u._role==="Teacher"?"bg-purple-500/20 text-purple-400 border-purple-500/30":"bg-blue-500/20 text-blue-400 border-blue-500/30"}`}>
+                          {u._role}
+                        </span>
+                        <span className="text-xs text-white/30">{u._id}</span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">Pending</span>
+                      </div>
+                    </div>
+                    <div className="flex gap-2 flex-shrink-0">
+                      <button
+                        onClick={()=>{
+                          if(u._role==="Teacher") upd(s=>({...s,teachers:s.teachers.map(t=>t.id===u.id?{...t,status:"approved" as const}:t)}));
+                          else upd(s=>({...s,students:s.students.map(st=>st.id===u.id?{...st,status:"approved" as const}:st)}));
+                        }}
+                        className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-4 py-2 rounded-xl transition-colors font-medium">
+                        <Check size={12}/>Approve
+                      </button>
+                      <button
+                        onClick={()=>{
+                          if(u._role==="Teacher") upd(s=>({...s,teachers:s.teachers.filter(t=>t.id!==u.id)}));
+                          else upd(s=>({...s,students:s.students.filter(st=>st.id!==u.id)}));
+                        }}
+                        className="flex items-center gap-1.5 border border-red-500/30 text-red-400 hover:bg-red-500/10 text-xs px-4 py-2 rounded-xl transition-colors">
+                        <X size={12}/>Reject
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      }
 
       case "classes": return(
         <div className="space-y-4">
