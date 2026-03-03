@@ -218,6 +218,7 @@ const SESSION_KEY    = "erp_session_user";
 const SESSION_EXPIRY = "erp_session_expiry";
 const SESSION_DASH   = "erp_in_dash";
 const ONE_HOUR_MS    = 60 * 60 * 1000;
+const STATE_KEY      = "erp_app_state";
 
 // ─── Logo persistence helpers ─────────────────────────────────────────────────
 const getSavedLogo = (): string => {
@@ -2506,6 +2507,7 @@ function CounselingInner({state,setState,db}:{state:AppState;setState:(fn:(s:App
     </div>
   );
 }
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // FEES & FINANCE MODULE
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -4520,13 +4522,44 @@ function RegistrationScreen({state,setState,onBack}:{state:AppState;setState:(fn
 }
 
 export default function SchoolERP() {
-  const [state,setState] = useState<AppState>(INITIAL);
+  // ─── Load saved state from localStorage on first render ───────────────────
+  const [state,setState] = useState<AppState>(() => {
+    try {
+      const saved = localStorage.getItem(STATE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved) as AppState;
+        // Merge: use saved data but fill any missing keys from INITIAL
+        return { ...INITIAL, ...parsed,
+          settings:   { ...INITIAL.settings,   ...parsed.settings },
+          inventory:  { ...INITIAL.inventory,   ...parsed.inventory },
+          fees:       { ...INITIAL.fees,        ...parsed.fees },
+          behavior:   { ...INITIAL.behavior,    ...parsed.behavior },
+          counseling: { ...INITIAL.counseling,  ...parsed.counseling },
+        };
+      }
+    } catch {}
+    return INITIAL;
+  });
   const [user,setUser]   = useState<LoggedInUser|null>(null);
   const [showReg,setReg] = useState(false);
   const [route,setRoute] = useState<string>("home"); // public site route
   const [inDash,setInDash] = useState(false); // true = show dashboard
   const [dbStatus,setDbStatus] = useState<"idle"|"loading"|"ok"|"offline">("idle");
-  const update = (fn:(s:AppState)=>AppState)=>setState(fn);
+
+  // ─── Persist full state to localStorage on every change ───────────────────
+  const update = (fn:(s:AppState)=>AppState) => {
+    setState(prev => {
+      const next = fn(prev);
+      try {
+        // Don't save logoUrl if it's a large base64 — save separately
+        const toSave = next.settings.logoUrl?.startsWith("data:")
+          ? { ...next, settings: { ...next.settings, logoUrl: "" } }
+          : next;
+        localStorage.setItem(STATE_KEY, JSON.stringify(toSave));
+      } catch {}
+      return next;
+    });
+  };
 
   // ─── Session restore on mount ────────────────────────────────────────────────
   useEffect(() => {
@@ -4558,7 +4591,7 @@ export default function SchoolERP() {
       sb.select<any>("behavior"),
       sb.select<any>("counseling_profiles"),
     ]).then(([students, teachers, items, labs, fees, behavior, counseling]) => {
-      setState(prev => ({
+      update(prev => ({
         ...prev,
         students:  students.length  ? students.map(dbToStudent)  : prev.students,
         teachers:  teachers.length  ? teachers.map(dbToTeacher)  : prev.teachers,
