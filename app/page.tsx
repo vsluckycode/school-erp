@@ -1,6 +1,6 @@
 "use client";
 import React, { useState, useEffect, useCallback } from "react";
-import { 
+import {
   School, Users, BookOpen, QrCode, Settings, BarChart3,
   Plus, X, Check, Trash2, GraduationCap, Clock, Award,
   Search, Bell, ChevronRight, Save, Shield,
@@ -8,8 +8,8 @@ import {
   CheckCircle, AlertCircle, TrendingUp, Grid3X3, Download, FileText,
   Upload, UserPlus, Phone, Printer,
   Globe, Image, Newspaper, Star, Users2, MapPin, Calendar, Tag, Edit2, ExternalLink, ChevronLeft, ChevronDown, PlayCircle,
-  HeartHandshake, DollarSign, Package, KeyRound, CreditCard, Boxes, ClipboardList, AlertTriangle, 
-  Database, Wifi, WifiOff, Menu, ClipboardCheck 
+  HeartHandshake, DollarSign, Package, KeyRound, CreditCard, Boxes, ClipboardList, AlertTriangle, Database, Wifi, WifiOff,
+  Menu
 } from "lucide-react";
 
 // ─── Supabase Client ──────────────────────────────────────────────────────────
@@ -213,11 +213,29 @@ function parseCSV(text:string):Record<string,string>[] {
   });
 }
 
+// ─── Session persistence (1-hour login) ──────────────────────────────────────
+const SESSION_KEY    = "erp_session_user";
+const SESSION_EXPIRY = "erp_session_expiry";
+const SESSION_DASH   = "erp_in_dash";
+const ONE_HOUR_MS    = 60 * 60 * 1000;
+
+// ─── Logo persistence helpers ─────────────────────────────────────────────────
+const getSavedLogo = (): string => {
+  if (typeof window === "undefined") return "";
+  try { return localStorage.getItem("school_logo") || ""; } catch { return ""; }
+};
+const saveLogo = (url: string) => {
+  try {
+    if (url) localStorage.setItem("school_logo", url);
+    else localStorage.removeItem("school_logo");
+  } catch {}
+};
+
 // ─── Seed Data ────────────────────────────────────────────────────────────────
 const BLOOD_GROUPS = ["A+","A-","B+","B-","AB+","AB-","O+","O-"];
 
 const INITIAL: AppState = {
-  settings: { name:"Nexus Academy", tagline:"Excellence in Education", logoUrl:"", blogUrl:"https://nexusacademy.edu.lk/blog", currency:"LKR", pwAdmin:"admin123", pwCounselor:"couns789", pwStaff:"staff456" },
+  settings: { name:"Nexus Academy", tagline:"Excellence in Education", logoUrl:getSavedLogo(), blogUrl:"https://nexusacademy.edu.lk/blog", currency:"LKR", pwAdmin:"admin123", pwCounselor:"couns789", pwStaff:"staff456" },
   classes: [
     { id:"c1", name:"9",  section:"A", teacherId:"t1" },
     { id:"c2", name:"10", section:"B", teacherId:"t2" },
@@ -368,6 +386,8 @@ const INITIAL: AppState = {
 const uid   = () => Math.random().toString(36).slice(2, 9);
 const today = new Date().toISOString().split("T")[0];
 
+
+
 function downloadCSV(filename:string, rows:string[][]){
   const content = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g,'""')}"`).join(",")).join("\n");
   const blob = new Blob([content], {type:"text/csv;charset=utf-8;"});
@@ -398,11 +418,11 @@ function gradeLabel(g:Grade){ return{A:"Excellent",B:"Good",C:"Average",S:"Simpl
 // ─── Grade Key Component (fix for cramped plain-text key shown in screenshots) ─
 function GradeKey() {
   const items = [
+    {g:"S",r:"≥ 90",cls:"bg-emerald-500/20 border-emerald-500/40 text-emerald-400"},
     {g:"A",r:"≥ 75",cls:"bg-blue-500/20 border-blue-500/40 text-blue-400"},
-    {g:"B",r:"≥ 65",cls:"bg-yellow-500/20 border-yellow-500/40 text-yellow-400"},
-    {g:"C",r:"≥ 55",cls:"bg-orange-500/20 border-orange-500/40 text-orange-400"},
-    {g:"S",r:"≥ 35",cls:"bg-emerald-500/20 border-emerald-500/40 text-emerald-400"},
-    {g:"W",r:"< 35", cls:"bg-red-500/20 border-red-500/40 text-red-400"},
+    {g:"B",r:"≥ 60",cls:"bg-yellow-500/20 border-yellow-500/40 text-yellow-400"},
+    {g:"C",r:"≥ 40",cls:"bg-orange-500/20 border-orange-500/40 text-orange-400"},
+    {g:"W",r:"< 40", cls:"bg-red-500/20 border-red-500/40 text-red-400"},
   ] as const;
   return (
     <div className="mt-5 pt-4 border-t border-white/10">
@@ -995,25 +1015,11 @@ function Layout({user,state,children,navItems,activeTab,setTab,onLogout}:
             const active=activeTab===n.id;
             return(
               <button key={n.id}
-  onClick={()=>handleNavClick(n.id)}
-  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-left ${active?"bg-blue-600/20 text-blue-300 border border-blue-500/20":"text-white/40 hover:text-white/70 hover:bg-white/5"}`}>
-  <div className="relative flex-shrink-0">
-    <n.icon size={15}/>
-    {(n as any).badge > 0 && (
-      <span className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 bg-amber-500 rounded-full text-[8px] text-white font-bold flex items-center justify-center leading-none">
-        {(n as any).badge > 9 ? "9+" : (n as any).badge}
-      </span>
-    )}
-  </div>
-  {showLabels && (
-    <span className="text-xs font-medium truncate flex-1">{n.label}</span>
-  )}
-  {showLabels && (n as any).badge > 0 && (
-    <span className="ml-auto bg-amber-500/20 text-amber-400 border border-amber-500/30 text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0">
-      {(n as any).badge}
-    </span>
-  )}
-</button>
+                onClick={()=>handleNavClick(n.id)}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-left ${active?"bg-blue-600/20 text-blue-300 border border-blue-500/20":"text-white/40 hover:text-white/70 hover:bg-white/5"}`}>
+                <n.icon size={15} className="flex-shrink-0"/>
+                {showLabels&&<span className="text-xs font-medium truncate">{n.label}</span>}
+              </button>
             );
           })}
         </nav>
@@ -1075,19 +1081,13 @@ function Layout({user,state,children,navItems,activeTab,setTab,onLogout}:
             >
               <Menu size={18}/>
             </button>
-            {/* School logo — mobile only */}
-<div className="flex md:hidden flex-shrink-0">
-  {state.settings.logoUrl
-    ? <img
-        src={state.settings.logoUrl}
-        className="w-8 h-8 rounded-lg object-cover flex-shrink-0"
-        style={{display:"block",minWidth:"2rem",minHeight:"2rem"}}
-      />
-    : <div className="w-8 h-8 rounded-lg bg-blue-500/20 border border-blue-500/30 flex items-center justify-center flex-shrink-0">
-        <School size={14} className="text-blue-400"/>
-      </div>
-  }
-</div>
+            {/* School logo — mobile only, shows when sidebar is hidden */}
+            <div className="md:hidden flex-shrink-0">
+              {state.settings.logoUrl
+                ? <img src={state.settings.logoUrl} className="w-7 h-7 rounded-lg object-cover"/>
+                : <div className="w-7 h-7 rounded-lg bg-blue-500/20 border border-blue-500/30 flex items-center justify-center"><School size={13} className="text-blue-400"/></div>
+              }
+            </div>
             <div className="min-w-0">
               <div className="text-sm font-semibold text-white capitalize truncate">{navItems.find(n=>n.id===activeTab)?.label}</div>
               <div className="text-xs text-white/30 hidden sm:block">{new Date().toLocaleDateString("en-IN",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</div>
@@ -1133,26 +1133,25 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
   const [editTch,setEditTch]   = useState<Teacher|null>(null);
   const upd = setState;
 
-  const pendingCount = state.students.filter(s=>s.status==="pending").length
-                   + state.teachers.filter(t=>t.status==="pending").length;
-
-const navItems = [
-  {id:"dashboard",  label:"Dashboard",   icon:BarChart3},
-  {id:"approvals",  label:"Approvals",   icon:ClipboardCheck, badge:pendingCount},
-  {id:"students",   label:"Students",    icon:Users},
-  {id:"teachers",   label:"Teachers",    icon:GraduationCap},
-  {id:"classes",    label:"Classes",     icon:School},
-  {id:"subjects",   label:"Subjects",    icon:BookOpen},
-  {id:"marks",      label:"Marks",       icon:Award},
-  {id:"attendance", label:"Attendance",  icon:Clock},
-  {id:"timetable",  label:"Timetable",   icon:Grid3X3},
-  {id:"counseling", label:"Counseling",  icon:HeartHandshake},
-  {id:"fees",       label:"Fees",        icon:DollarSign},
-  {id:"inventory",  label:"Inventory",   icon:Package},
-  {id:"behavior",   label:"Behaviour",   icon:ClipboardList},
-  {id:"security",   label:"Security",    icon:Shield},
-  {id:"settings",   label:"Settings",    icon:Settings},
-];
+  const NAV=[
+    {id:"dashboard",        label:"Dashboard",        icon:Grid3X3},
+    {id:"classes",          label:"Classes",          icon:School},
+    {id:"subjects",         label:"Subjects",         icon:BookOpen},
+    {id:"teachers",         label:"Teachers",         icon:GraduationCap},
+    {id:"students",         label:"Students",         icon:Users},
+    {id:"marks",            label:"Marks Entry",      icon:Award},
+    {id:"timetable",        label:"Timetable",        icon:Clock},
+    {id:"attendance",       label:"QR Attendance",    icon:QrCode},
+    {id:"ledger",           label:"Result Ledger",    icon:BarChart3},
+    {id:"counseling",       label:"Counseling",       icon:HeartHandshake},
+    {id:"behavior",         label:"Behavior",         icon:AlertTriangle},
+    {id:"fees",             label:"Fees & Finance",   icon:DollarSign},
+    {id:"inventory",        label:"Inventory",        icon:Package},
+    {id:"website",          label:"Website CMS",      icon:Globe},
+    {id:"manage_staff",     label:"Manage Staff",     icon:Users2},
+    {id:"manage_downloads", label:"Manage Downloads", icon:Download},
+    {id:"settings",         label:"Settings",         icon:Settings},
+  ];
 
   function importStudentsCSV(text:string){
     const rows=parseCSV(text);
@@ -1249,7 +1248,6 @@ const navItems = [
                         </button>
                       </div>
                     </div>
-                    
                   ))}
                 </div>
               </div>
@@ -1303,78 +1301,6 @@ const navItems = [
           </div>
         </div>
       );
-      case "approvals": {
-  const pendingS = state.students.filter(s=>s.status==="pending");
-  const pendingT = state.teachers.filter(t=>t.status==="pending");
-  const all = [
-    ...pendingT.map(t=>({...t, _role:"Teacher" as const, _id:t.email})),
-    ...pendingS.map(s=>({...s, _role:"Student" as const, _id:s.rollNo})),
-  ];
-  return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-bold text-white">Pending Approvals</h2>
-          <p className="text-white/30 text-xs mt-0.5">Review and approve new registration requests.</p>
-        </div>
-        {all.length > 0 && (
-          <span className="bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-bold px-3 py-1.5 rounded-full">
-            {all.length} pending
-          </span>
-        )}
-      </div>
-
-      {all.length === 0 ? (
-        <div className="bg-[#080D18] border border-white/5 rounded-2xl p-12 text-center">
-          <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mx-auto mb-4">
-            <Check size={24} className="text-emerald-400"/>
-          </div>
-          <div className="text-white font-semibold mb-1">All clear!</div>
-          <div className="text-white/30 text-sm">No pending registration requests.</div>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {all.map(u => (
-            <div key={u.id} className="bg-[#080D18] border border-white/5 rounded-2xl p-4 flex items-center gap-4">
-              <img
-                src={"photo" in u ? u.photo : `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.name}`}
-                className="w-12 h-12 rounded-full flex-shrink-0 bg-white/5"
-              />
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold text-white">{u.name}</div>
-                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full border font-medium ${u._role==="Teacher"?"bg-purple-500/20 text-purple-400 border-purple-500/30":"bg-blue-500/20 text-blue-400 border-blue-500/30"}`}>
-                    {u._role}
-                  </span>
-                  <span className="text-xs text-white/30">{u._id}</span>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">Pending</span>
-                </div>
-              </div>
-              <div className="flex gap-2 flex-shrink-0">
-                <button
-                  onClick={()=>{
-                    if(u._role==="Teacher") upd(s=>({...s,teachers:s.teachers.map(t=>t.id===u.id?{...t,status:"approved" as const}:t)}));
-                    else upd(s=>({...s,students:s.students.map(st=>st.id===u.id?{...st,status:"approved" as const}:st)}));
-                  }}
-                  className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-4 py-2 rounded-xl transition-colors font-medium">
-                  <Check size={12}/>Approve
-                </button>
-                <button
-                  onClick={()=>{
-                    if(u._role==="Teacher") upd(s=>({...s,teachers:s.teachers.filter(t=>t.id!==u.id)}));
-                    else upd(s=>({...s,students:s.students.filter(st=>st.id!==u.id)}));
-                  }}
-                  className="flex items-center gap-1.5 border border-red-500/30 text-red-400 hover:bg-red-500/10 text-xs px-4 py-2 rounded-xl transition-colors">
-                  <X size={12}/>Reject
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
       case "classes": return(
         <div className="space-y-4">
@@ -1699,7 +1625,7 @@ const navItems = [
   }
 
   return(
-    <Layout user={user} state={state} navItems={navItems} activeTab={tab} setTab={setTab} onLogout={onLogout}>
+    <Layout user={user} state={state} navItems={NAV} activeTab={tab} setTab={setTab} onLogout={onLogout}>
       {renderTab()}
       {popup&&<div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={e=>e.target===e.currentTarget&&setPopup(null)}>{renderPopup()}</div>}
       {editSt&&<div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"><StudentProfileModal student={editSt} state={state} onSave={u=>db.updateStudent(u)} onClose={()=>setEditSt(null)}/></div>}
@@ -2040,7 +1966,6 @@ function StudentView({user,state,onLogout}:
           </div>
         </div>
       );
-      
 
       // ✅ My Results — with Download PDF button
       case "marks": return(
@@ -2417,7 +2342,6 @@ function CounselingInner({state,setState,db}:{state:AppState;setState:(fn:(s:App
     </div>
   );
 }
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // FEES & FINANCE MODULE
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -3072,11 +2996,11 @@ function SettingsTab({state,upd,isSA,setPopup}:{state:AppState;upd:(fn:(s:AppSta
                 {state.settings.logoUrl?<img src={state.settings.logoUrl} className="w-full h-full object-cover"/>:<School size={22} className="text-white/20"/>}
               </div>
               <div className="flex-1 space-y-2">
-                <label className="flex items-center gap-2 cursor-pointer bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-400 text-xs px-3 py-2 rounded-lg transition-colors w-fit"><Upload size={12}/>Upload Image<input type="file" accept="image/*" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(!f)return;const r=new FileReader();r.onload=ev=>upd(s=>({...s,settings:{...s.settings,logoUrl:ev.target?.result as string}}));r.readAsDataURL(f);}}/></label>
-                <input value={state.settings.logoUrl?.startsWith("data:")?"":(state.settings.logoUrl||"")} onChange={e=>upd(s=>({...s,settings:{...s.settings,logoUrl:e.target.value}}))} placeholder="...or paste image URL" className="w-full bg-white/5 border border-white/10 text-white text-xs rounded-lg px-3 py-2 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+                <label className="flex items-center gap-2 cursor-pointer bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-400 text-xs px-3 py-2 rounded-lg transition-colors w-fit"><Upload size={12}/>Upload Image<input type="file" accept="image/*" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(!f)return;const r=new FileReader();r.onload=ev=>{const logoUrl=ev.target?.result as string;try{localStorage.setItem("school_logo",logoUrl);}catch{}upd(s=>({...s,settings:{...s.settings,logoUrl}}));};r.readAsDataURL(f);}}/></label>
+                <input value={state.settings.logoUrl?.startsWith("data:")?"":(state.settings.logoUrl||"")} onChange={e=>{const logoUrl=e.target.value;try{if(logoUrl)localStorage.setItem("school_logo",logoUrl);else localStorage.removeItem("school_logo");}catch{}upd(s=>({...s,settings:{...s.settings,logoUrl}}));}} placeholder="...or paste image URL" className="w-full bg-white/5 border border-white/10 text-white text-xs rounded-lg px-3 py-2 outline-none focus:border-blue-500/50 placeholder-white/20"/>
               </div>
             </div>
-            {state.settings.logoUrl&&<button onClick={()=>upd(s=>({...s,settings:{...s.settings,logoUrl:""}}))} className="mt-2 text-xs text-red-400/60 hover:text-red-400 transition-colors">Remove logo</button>}
+            {state.settings.logoUrl&&<button onClick={()=>{try{localStorage.removeItem("school_logo");}catch{}upd(s=>({...s,settings:{...s.settings,logoUrl:""}}))} } className="mt-2 text-xs text-red-400/60 hover:text-red-400 transition-colors">Remove logo</button>}
           </div>
           {!isSA&&(
             <div>
@@ -4350,17 +4274,27 @@ function RegistrationScreen({state,setState,onBack}:{state:AppState;setState:(fn
   const [error,setError]=useState("");
   const set=(k:keyof typeof form)=>(v:string)=>setForm(f=>({...f,[k]:v}));
 
-  function submit(){
+  async function submit(){
     if(!form.name||!form.password){setError("Name and password are required.");return;}
     if(form.password!==form.confirm){setError("Passwords do not match.");return;}
     if(role==="student"&&!form.rollNo){setError("Roll number is required.");return;}
     if(role==="teacher"&&!form.email){setError("Email is required.");return;}
     if(role==="teacher"&&state.teachers.find(t=>t.email===form.email)){setError("Email already registered.");return;}
     if(role==="student"&&state.students.find(s=>s.rollNo===form.rollNo)){setError("Roll number already registered.");return;}
+    const newId = uid();
     if(role==="teacher"){
-      setState(s=>({...s,teachers:[...s.teachers,{id:uid(),name:form.name,email:form.email,subjectIds:[],classIds:[],password:form.password,status:"pending"}]}));
+      const t:Teacher={id:newId,name:form.name,email:form.email,subjectIds:[],classIds:[],password:form.password,status:"pending"};
+      setState(s=>({...s,teachers:[...s.teachers,t]}));
+      if(sb.isConfigured()){
+        await sb.insert("teachers",{id:newId,name:form.name,email:form.email,password:form.password,subject_ids:[],class_ids:[],status:"pending"});
+      }
     } else {
-      setState(s=>({...s,students:[...s.students,{id:uid(),name:form.name,rollNo:form.rollNo,classId:form.classId,photo:`https://api.dicebear.com/7.x/avataaars/svg?seed=${form.name}`,marks:{},password:form.password,status:"pending"}]}));
+      const photo=`https://api.dicebear.com/7.x/avataaars/svg?seed=${form.name}`;
+      const st:Student={id:newId,name:form.name,rollNo:form.rollNo,classId:form.classId,photo,marks:{},password:form.password,status:"pending"};
+      setState(s=>({...s,students:[...s.students,st]}));
+      if(sb.isConfigured()){
+        await sb.insert("students",{id:newId,name:form.name,roll_no:form.rollNo,class_id:form.classId,photo,marks:{},password:form.password,status:"pending"});
+      }
     }
     setStep("done");
   }
@@ -4423,49 +4357,29 @@ function RegistrationScreen({state,setState,onBack}:{state:AppState;setState:(fn
 
 export default function SchoolERP() {
   const [state,setState] = useState<AppState>(INITIAL);
-  const registerNewUser = (formData: any, role: "student" | "teacher") => {
-    const id = Math.random().toString(36).slice(2, 9);
-    
-    if (role === "student") {
-      const newStudent: Student = {
-        id,
-        name: formData.name,
-        rollNo: formData.rollNo || "S-" + Math.floor(Math.random() * 1000),
-        classId: formData.classId || "c1",
-        photo: `https://api.dicebear.com/7.x/avataaars/svg?seed=${formData.name}`,
-        marks: {},
-        password: formData.password,
-        status: "pending" as const,
-      };
-      
-      setState(prev => ({ 
-        ...prev, 
-        students: [...prev.students, newStudent] 
-      }));
-    } else {
-      const newTeacher: Teacher = {
-        id,
-        name: formData.name,
-        email: formData.email,
-        password: formData.password,
-        subjectIds: [],
-        classIds: [],
-        status: "pending" as const,
-      };
-      
-      setState(prev => ({ 
-        ...prev, 
-        teachers: [...prev.teachers, newTeacher] 
-      }));
-    }
-    alert("Registration sent for Admin approval!");
-  };
   const [user,setUser]   = useState<LoggedInUser|null>(null);
   const [showReg,setReg] = useState(false);
   const [route,setRoute] = useState<string>("home"); // public site route
   const [inDash,setInDash] = useState(false); // true = show dashboard
   const [dbStatus,setDbStatus] = useState<"idle"|"loading"|"ok"|"offline">("idle");
   const update = (fn:(s:AppState)=>AppState)=>setState(fn);
+
+  // ─── Session restore on mount ────────────────────────────────────────────────
+  useEffect(() => {
+    try {
+      const expiry = localStorage.getItem(SESSION_EXPIRY);
+      if (expiry && Date.now() < parseInt(expiry)) {
+        const savedUser = localStorage.getItem(SESSION_KEY);
+        const savedDash = localStorage.getItem(SESSION_DASH);
+        if (savedUser) setUser(JSON.parse(savedUser));
+        if (savedDash === "true") setInDash(true);
+      } else {
+        localStorage.removeItem(SESSION_KEY);
+        localStorage.removeItem(SESSION_EXPIRY);
+        localStorage.removeItem(SESSION_DASH);
+      }
+    } catch {}
+  }, []);
 
   // ─── Supabase: Load data on mount ──────────────────────────────────────────
   useEffect(() => {
@@ -4691,7 +4605,7 @@ export default function SchoolERP() {
   // Dashboard routes
   if(inDash){
     if(showReg) return(<><style>{globalStyle}</style><RegistrationScreen state={state} setState={update} onBack={()=>setReg(false)}/></>);
-    if(!user) return(<><style>{globalStyle}</style><LoginScreen state={state} db={db} onLogin={setUser} onRegister={()=>setReg(true)} onBack={()=>setInDash(false)}/></>);
+    if(!user) return(<><style>{globalStyle}</style><LoginScreen state={state} db={db} onLogin={(loggedInUser)=>{try{localStorage.setItem(SESSION_KEY,JSON.stringify(loggedInUser));localStorage.setItem(SESSION_EXPIRY,String(Date.now()+ONE_HOUR_MS));localStorage.setItem(SESSION_DASH,"true");}catch{}setUser(loggedInUser);setInDash(true);}} onRegister={()=>setReg(true)} onBack={()=>setInDash(false)}/></>);
     return(
       <>
         <style>{globalStyle}</style>
@@ -4701,10 +4615,10 @@ export default function SchoolERP() {
           {dbStatus==="ok"&&<div className="flex items-center gap-1.5 bg-[#080D18] border border-emerald-500/20 rounded-full px-3 py-1.5 text-[10px] text-emerald-400"><Wifi size={10}/>Supabase connected</div>}
           {dbStatus==="offline"&&<div className="flex items-center gap-1.5 bg-[#080D18] border border-amber-500/20 rounded-full px-3 py-1.5 text-[10px] text-amber-400"><WifiOff size={10}/>Local mode (no DB)</div>}
         </div>
-        {(user.role==="admin")         &&<AdminView   user={user} state={state} setState={update} db={db} onLogout={()=>{setUser(null);setInDash(false);}}/>}
-        {(user.role==="support_admin") &&<AdminView   user={user} state={state} setState={update} db={db} onLogout={()=>{setUser(null);setInDash(false);}} isSA/>}
-        {user.role==="teacher"         &&<TeacherView user={user} state={state} setState={update} onLogout={()=>{setUser(null);setInDash(false);}}/>}
-        {user.role==="student"         &&<StudentView user={user} state={state} onLogout={()=>{setUser(null);setInDash(false);}}/>}
+        {(user.role==="admin")         &&<AdminView   user={user} state={state} setState={update} db={db} onLogout={()=>{try{localStorage.removeItem(SESSION_KEY);localStorage.removeItem(SESSION_EXPIRY);localStorage.removeItem(SESSION_DASH);}catch{}setUser(null);setInDash(false);}}/>}
+        {(user.role==="support_admin") &&<AdminView   user={user} state={state} setState={update} db={db} onLogout={()=>{try{localStorage.removeItem(SESSION_KEY);localStorage.removeItem(SESSION_EXPIRY);localStorage.removeItem(SESSION_DASH);}catch{}setUser(null);setInDash(false);}} isSA/>}
+        {user.role==="teacher"         &&<TeacherView user={user} state={state} setState={update} onLogout={()=>{try{localStorage.removeItem(SESSION_KEY);localStorage.removeItem(SESSION_EXPIRY);localStorage.removeItem(SESSION_DASH);}catch{}setUser(null);setInDash(false);}}/>}
+        {user.role==="student"         &&<StudentView user={user} state={state} onLogout={()=>{try{localStorage.removeItem(SESSION_KEY);localStorage.removeItem(SESSION_EXPIRY);localStorage.removeItem(SESSION_DASH);}catch{}setUser(null);setInDash(false);}}/>}
       </>
     );
   }
