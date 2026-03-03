@@ -9,7 +9,7 @@ import {
   Upload, UserPlus, Phone, Printer,
   Globe, Image, Newspaper, Star, Users2, MapPin, Calendar, Tag, Edit2, ExternalLink, ChevronLeft, ChevronDown, PlayCircle,
   HeartHandshake, DollarSign, Package, KeyRound, CreditCard, Boxes, ClipboardList, AlertTriangle, Database, Wifi, WifiOff,
-  Menu, ClipboardCheck
+  Menu, ClipboardCheck, Camera
 } from "lucide-react";
 
 // ─── Supabase Client ──────────────────────────────────────────────────────────
@@ -19,21 +19,24 @@ import {
 // ─── REQUIRED SUPABASE TABLES ───────────────────────────────────────────────
 // Run this SQL in your Supabase SQL editor (Dashboard → SQL Editor → New Query):
 //
-// create table if not exists subjects (
-//   id text primary key, name text, code text,
-//   class_ids jsonb default '[]', teacher_id text
-// );
-// create table if not exists classes (
-//   id text primary key, name text, section text, teacher_id text
-// );
-// create table if not exists timetable (
-//   id text primary key, class_id text, day text,
-//   period int, subject_id text, teacher_id text
-// );
+// create table if not exists app_config (id text primary key, data jsonb);
+// create table if not exists subjects (id text primary key, name text, code text, class_ids jsonb default '[]', teacher_id text);
+// create table if not exists classes (id text primary key, name text, section text, teacher_id text);
+// create table if not exists timetable (id text primary key, class_id text, day text, period int, subject_id text, teacher_id text);
 //
-// Also add these policies in Authentication → Policies for each new table:
-//   Enable read for all users (anon)
-//   Enable insert/update/delete for authenticated or use service role key
+// -- Add photo column to existing teachers and students tables:
+// alter table teachers add column if not exists photo text;
+// alter table students add column if not exists photo text;
+//
+// -- Allow all for anon (same as your other tables):
+// alter table app_config enable row level security;
+// create policy "allow all" on app_config for all using (true) with check (true);
+// alter table subjects enable row level security;
+// create policy "allow all" on subjects for all using (true) with check (true);
+// alter table classes enable row level security;
+// create policy "allow all" on classes for all using (true) with check (true);
+// alter table timetable enable row level security;
+// create policy "allow all" on timetable for all using (true) with check (true);
 // ────────────────────────────────────────────────────────────────────────────
 const SUPABASE_URL  = process.env.NEXT_PUBLIC_SUPABASE_URL  || "";
 const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
@@ -167,9 +170,14 @@ type Grade = "S" | "A" | "B" | "C" | "W" | "-";
 
 interface StudentProfile { dob?:string; gender?:string; address?:string; phone?:string; parentName?:string; parentPhone?:string; bloodGroup?:string; nic?:string; }
 interface TeacherProfile { dob?:string; gender?:string; address?:string; phone?:string; qualification?:string; joinDate?:string; nic?:string; specialization?:string; }
+// PHASE 1: Subject categories
+type SubjectCategory = "Arts" | "Science" | "Commerce" | "General";
+
 interface Student { id:string; name:string; rollNo:string; classId:string; photo:string; marks:Record<string,number>; password:string; profile?:StudentProfile; status?:"pending"|"approved"; }
-interface Teacher { id:string; name:string; email:string; subjectIds:string[]; classIds:string[]; password:string; photo?:string; profile?:TeacherProfile; status?:"pending"|"approved"; }
-interface Subject { id:string; name:string; code:string; classIds:string[]; teacherId:string }
+// PHASE 2: is_counselor, is_bursar roles on Teacher
+interface Teacher { id:string; name:string; email:string; subjectIds:string[]; classIds:string[]; password:string; photo?:string; profile?:TeacherProfile; status?:"pending"|"approved"; is_counselor?:boolean; is_bursar?:boolean; }
+// PHASE 1: category on Subject
+interface Subject { id:string; name:string; code:string; classIds:string[]; teacherId:string; category?:SubjectCategory; }
 interface Class   { id:string; name:string; section:string; teacherId:string }
 interface TimetableSlot { day:string; period:number; subjectId:string; teacherId:string }
 interface SchoolSettings { name:string; tagline:string; logoUrl:string; blogUrl:string; currency:string; pwAdmin:string; pwCounselor:string; pwStaff:string; }
@@ -288,15 +296,15 @@ const INITIAL: AppState = {
     { id:"c2", name:"10", section:"B", teacherId:"t2" },
   ],
   subjects: [
-    { id:"s1", name:"Mathematics", code:"MTH", classIds:["c1","c2"], teacherId:"t1" },
-    { id:"s2", name:"Physics",     code:"PHY", classIds:["c1"],       teacherId:"t2" },
-    { id:"s3", name:"Chemistry",   code:"CHM", classIds:["c2"],       teacherId:"t2" },
-    { id:"s4", name:"English",     code:"ENG", classIds:["c1","c2"], teacherId:"t1" },
+    { id:"s1", name:"Mathematics", code:"MTH", classIds:["c1","c2"], teacherId:"t1", category:"Science" as SubjectCategory },
+    { id:"s2", name:"Physics",     code:"PHY", classIds:["c1"],       teacherId:"t2", category:"Science" as SubjectCategory },
+    { id:"s3", name:"Chemistry",   code:"CHM", classIds:["c2"],       teacherId:"t2", category:"Science" as SubjectCategory },
+    { id:"s4", name:"English",     code:"ENG", classIds:["c1","c2"], teacherId:"t1", category:"Arts" as SubjectCategory },
   ],
   teachers: [
-    { id:"t1", name:"Dr. Arjun Mehta",  email:"arjun@nexus.edu",  subjectIds:["s1","s4"], classIds:["c1","c2"], password:"teacher123",
+    { id:"t1", name:"Dr. Arjun Mehta",  email:"arjun@nexus.edu",  subjectIds:["s1","s4"], classIds:["c1","c2"], password:"teacher123", is_counselor:false, is_bursar:false,
       profile: encProfile({dob:"1985-06-15",gender:"Male",phone:"0771234567",address:"12 Main St, Colombo",qualification:"PhD Mathematics",joinDate:"2020-01-10",nic:"850615V",specialization:"Applied Mathematics"}) },
-    { id:"t2", name:"Ms. Priya Sharma", email:"priya@nexus.edu",  subjectIds:["s2","s3"], classIds:["c1","c2"], password:"teacher456",
+    { id:"t2", name:"Ms. Priya Sharma", email:"priya@nexus.edu",  subjectIds:["s2","s3"], classIds:["c1","c2"], password:"teacher456", is_counselor:true, is_bursar:true,
       profile: encProfile({dob:"1990-03-22",gender:"Female",phone:"0779876543",address:"45 Lake Rd, Kandy",qualification:"MSc Physics",joinDate:"2021-08-01",nic:"900322V",specialization:"Nuclear Physics"}) },
   ],
   students: [
@@ -449,6 +457,7 @@ const PERIODS = [1,2,3,4,5,6];
 function getGrade(avg:number):Grade {
   if(avg>=75) return "A";
   if(avg>=65) return "B";
+  // PHASE 5: A≥75, B≥65, C≥55, S≥35, W<35
   if(avg>=55) return "C";
   if(avg>=35) return "S";
   if(avg>0)   return "W";
@@ -462,14 +471,14 @@ function gradeBg(g:Grade){
 }
 function gradeLabel(g:Grade){ return{A:"Excellent",B:"Good",C:"Average",S:"Simple Pass",W:"Fail","-":"–"}[g]; }
 
-// ─── Grade Key Component (fix for cramped plain-text key shown in screenshots) ─
+// ─── Grade Key Component — PHASE 5 updated thresholds ────────────────────────
 function GradeKey() {
   const items = [
-    {g:"S",r:"≥ 90",cls:"bg-emerald-500/20 border-emerald-500/40 text-emerald-400"},
     {g:"A",r:"≥ 75",cls:"bg-blue-500/20 border-blue-500/40 text-blue-400"},
-    {g:"B",r:"≥ 60",cls:"bg-yellow-500/20 border-yellow-500/40 text-yellow-400"},
-    {g:"C",r:"≥ 40",cls:"bg-orange-500/20 border-orange-500/40 text-orange-400"},
-    {g:"W",r:"< 40", cls:"bg-red-500/20 border-red-500/40 text-red-400"},
+    {g:"B",r:"≥ 65",cls:"bg-yellow-500/20 border-yellow-500/40 text-yellow-400"},
+    {g:"C",r:"≥ 55",cls:"bg-orange-500/20 border-orange-500/40 text-orange-400"},
+    {g:"S",r:"≥ 35",cls:"bg-emerald-500/20 border-emerald-500/40 text-emerald-400"},
+    {g:"W",r:"< 35", cls:"bg-red-500/20 border-red-500/40 text-red-400"},
   ] as const;
   return (
     <div className="mt-5 pt-4 border-t border-white/10">
@@ -519,7 +528,7 @@ function downloadResultPDF(student:Student, state:AppState) {
   const rows = mySubjects.map(sub=>{
     const m=student.marks[sub.id];
     const g=m!==undefined?getGrade(m):"-";
-    const color=m===undefined?"#888":m>=75?"#10b981":m>=40?"#f59e0b":"#ef4444";
+    const color=m===undefined?"#888":m>=75?"#10b981":m>=35?"#f59e0b":"#ef4444";
     return`<tr><td style="padding:10px 16px;border-bottom:1px solid #e2e8f0">${sub.code}</td><td style="padding:10px 16px;border-bottom:1px solid #e2e8f0">${sub.name}</td><td style="padding:10px 16px;border-bottom:1px solid #e2e8f0;text-align:center;font-family:monospace;color:${color};font-weight:bold">${m??'–'}/100</td><td style="padding:10px 16px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:bold;color:${color}">${m!==undefined?g:"–"}</td></tr>`;
   }).join("");
 
@@ -541,7 +550,7 @@ function downloadResultPDF(student:Student, state:AppState) {
     <div class="sbox"><div class="sval" style="color:${gColor(grade)}">${grade}</div><div class="slabel">Overall Grade</div></div>
   </div>
   <table><thead><tr><th>Code</th><th>Subject</th><th style="text-align:center">Marks</th><th style="text-align:center">Grade</th></tr></thead><tbody>${rows}</tbody></table>
-  <div class="gkey"><span>Grade Key:</span><span>S=90–100</span><span>A=75–89</span><span>B=60–74</span><span>C=40–59</span><span>W=Below 40</span></div>
+  <div class="gkey"><span>Grade Key:</span><span>A=75–100</span><span>B=65–74</span><span>C=55–64</span><span>S=35–54</span><span>W=Below 35</span></div>
   <div class="footer">Generated on ${new Date().toLocaleDateString("en-IN",{weekday:"long",year:"numeric",month:"long",day:"numeric"})} · ${state.settings.name}</div>
   </body></html>`;
 
@@ -601,17 +610,22 @@ function StudentProfileModal({student,state,onSave,onClose}:{student:Student;sta
   return(
     <div className="bg-[#080D18] border border-white/10 rounded-2xl p-6 w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto">
       <div className="flex items-center gap-3 mb-5">
-        <label className="cursor-pointer group relative flex-shrink-0">
-          {photo
-            ?<img src={photo} className="w-16 h-16 rounded-xl border border-white/10 object-cover"/>
-            :<div className="w-16 h-16 rounded-xl bg-gradient-to-br from-blue-500/30 to-purple-500/30 border border-white/10 flex items-center justify-center text-white font-bold text-2xl">{(sName||student.name)[0]}</div>
-          }
-          <div className="absolute inset-0 bg-black/60 rounded-xl opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center transition-opacity gap-1">
-            <Upload size={16} className="text-white"/>
-            <span className="text-white text-[9px] font-medium">PHOTO</span>
+        <div className="flex flex-col items-center gap-1 flex-shrink-0">
+          <div className="relative">
+            {photo
+              ?<img src={photo} className="w-16 h-16 rounded-xl border border-white/10 object-cover"/>
+              :<div className="w-16 h-16 rounded-xl bg-gradient-to-br from-blue-500/30 to-purple-500/30 border border-white/10 flex items-center justify-center text-white font-bold text-2xl">{(sName||student.name)[0]}</div>
+            }
+            <label className="absolute -bottom-1 -right-1 w-6 h-6 bg-blue-600 hover:bg-blue-500 rounded-full flex items-center justify-center cursor-pointer shadow-lg border-2 border-[#080D18]">
+              <Upload size={10} className="text-white"/>
+              <input type="file" accept="image/*" className="hidden" onChange={handlePhoto}/>
+            </label>
           </div>
-          <input type="file" accept="image/*" className="hidden" onChange={handlePhoto}/>
-        </label>
+          <label className="text-[10px] text-blue-400 underline cursor-pointer">
+            {photo?"Change":"Add Photo"}
+            <input type="file" accept="image/*" className="hidden" onChange={handlePhoto}/>
+          </label>
+        </div>
         <div className="flex-1 min-w-0 space-y-1">
           <input value={sName} onChange={e=>setSName(e.target.value)} className="w-full bg-transparent text-white font-bold text-sm outline-none border-b border-white/10 focus:border-blue-500/50 pb-0.5"/>
           <div className="flex gap-2">
@@ -657,32 +671,37 @@ function StudentIDCard({student,cls,schoolName,schoolTagline,onClose}:{student:S
   const qrData  = encodeURIComponent(`STUDENT:${student.rollNo}:${student.name}`);
   const qrUrl   = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${qrData}&bgcolor=0d1117&color=60a5fa&margin=8`;
   const d       = decProfile(student.profile);
-  const bloodGroup = d.bloodGroup||"—";
+  const bloodGroup   = d.bloodGroup  || "—";
+  const phone        = d.phone       || "";
+  const address      = d.address     || "";
+  const parentName   = d.parentName  || "";
 
   function downloadCard(){
-    // Use browser print in a new window for reliable card download
     const card=cardRef.current;
     if(!card) return;
     const html=`<!DOCTYPE html><html><head><style>
       *{margin:0;padding:0;box-sizing:border-box}
       body{background:#0d1117;display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:'Segoe UI',sans-serif}
-      .card{width:340px;background:linear-gradient(135deg,#0f1729 0%,#111827 50%,#0d1b2a 100%);border:1px solid rgba(59,130,246,0.3);border-radius:16px;overflow:hidden;color:white}
-      .top{background:linear-gradient(135deg,#1e3a5f,#1e40af);padding:16px;display:flex;align-items:center;gap:12px}
+      .card{width:360px;background:linear-gradient(135deg,#0f1729 0%,#111827 50%,#0d1b2a 100%);border:1px solid rgba(59,130,246,0.3);border-radius:16px;overflow:hidden;color:white}
+      .top{background:linear-gradient(135deg,#1e3a5f,#1e40af);padding:14px 16px;display:flex;align-items:center;gap:12px}
       .top .school-name{font-size:14px;font-weight:700;color:white}
       .top .school-tag{font-size:10px;color:rgba(255,255,255,0.6);margin-top:2px}
-      .body{padding:20px;display:flex;gap:16px;align-items:flex-start}
-      .photo{width:80px;height:80px;border-radius:12px;border:2px solid rgba(59,130,246,0.5);flex-shrink:0;object-fit:cover}
+      .body{padding:16px;display:flex;gap:14px;align-items:flex-start}
+      .photo{width:82px;height:90px;border-radius:10px;border:2px solid rgba(59,130,246,0.5);flex-shrink:0;object-fit:cover}
       .info{flex:1}
-      .name{font-size:16px;font-weight:700;color:white;margin-bottom:4px}
-      .roll{font-size:11px;color:#60a5fa;font-family:monospace;margin-bottom:8px}
-      .row{display:flex;justify-content:space-between;font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:3px}
-      .row span{color:rgba(255,255,255,0.85);font-weight:500}
-      .bottom{padding:12px 20px;display:flex;align-items:center;justify-content:space-between;border-top:1px solid rgba(255,255,255,0.08)}
-      .qr{border-radius:8px;overflow:hidden}
+      .name{font-size:15px;font-weight:700;color:white;margin-bottom:2px}
+      .roll{font-size:11px;color:#60a5fa;font-family:monospace;margin-bottom:7px}
+      .row{display:flex;justify-content:space-between;font-size:10.5px;color:rgba(255,255,255,0.45);margin-bottom:3px}
+      .row span{color:rgba(255,255,255,0.88);font-weight:500;text-align:right;max-width:160px}
+      .divider{border:none;border-top:1px solid rgba(255,255,255,0.07);margin:10px 16px}
+      .contact{padding:0 16px 10px}
+      .contact-row{display:flex;gap:6px;font-size:10px;color:rgba(255,255,255,0.45);margin-bottom:4px;align-items:flex-start}
+      .contact-row span{color:rgba(255,255,255,0.8);font-weight:500}
+      .bottom{padding:10px 16px;display:flex;align-items:center;justify-content:space-between;border-top:1px solid rgba(255,255,255,0.08)}
       .badge{background:rgba(59,130,246,0.15);border:1px solid rgba(59,130,246,0.3);border-radius:8px;padding:6px 12px;text-align:center}
       .badge .label{font-size:9px;color:#60a5fa;text-transform:uppercase;letter-spacing:1px}
-      .badge .val{font-size:13px;font-weight:700;color:white;margin-top:2px}
-      @media print{body{min-height:0}@page{size:340px 240px;margin:0}}
+      .badge .val{font-size:13px;font-weight:700;color:white;margin-top:2px;font-family:monospace}
+      @media print{body{min-height:0}@page{size:360px 290px;margin:0}}
     </style></head><body>
     <div class="card">
       <div class="top">
@@ -699,13 +718,19 @@ function StudentIDCard({student,cls,schoolName,schoolTagline,onClose}:{student:S
           <div class="row">Academic Year <span>${new Date().getFullYear()}</span></div>
         </div>
       </div>
+      <hr class="divider"/>
+      <div class="contact">
+        ${parentName?`<div class="contact-row">👤 Custodian &nbsp;<span>${parentName}</span></div>`:""}
+        ${phone?`<div class="contact-row">📞 Phone &nbsp;<span>${phone}</span></div>`:""}
+        ${address?`<div class="contact-row">📍 Address &nbsp;<span>${address}</span></div>`:""}
+      </div>
       <div class="bottom">
         <div class="badge"><div class="label">Student ID</div><div class="val">${student.rollNo}</div></div>
-        <img src="${qrUrl}" class="qr" width="80" height="80"/>
+        <img src="${qrUrl}" width="78" height="78" style="border-radius:8px"/>
       </div>
     </div>
     </body></html>`;
-    const w=window.open("","_blank","width=400,height=320");
+    const w=window.open("","_blank","width=420,height=360");
     if(!w) return;
     w.document.write(html);
     w.document.close();
@@ -715,35 +740,58 @@ function StudentIDCard({student,cls,schoolName,schoolTagline,onClose}:{student:S
   return(
     <div className="flex flex-col items-center gap-4" style={{animation:"fadeUp 0.3s ease"}}>
       {/* Live preview card */}
-      <div ref={cardRef} style={{width:340,background:"linear-gradient(135deg,#0f1729 0%,#111827 50%,#0d1b2a 100%)",border:"1px solid rgba(59,130,246,0.3)",borderRadius:16,overflow:"hidden",fontFamily:"system-ui,sans-serif"}}>
+      <div ref={cardRef} style={{width:360,background:"linear-gradient(135deg,#0f1729 0%,#111827 50%,#0d1b2a 100%)",border:"1px solid rgba(59,130,246,0.3)",borderRadius:16,overflow:"hidden",fontFamily:"system-ui,sans-serif"}}>
         {/* Header */}
         <div style={{background:"linear-gradient(135deg,#1e3a5f,#1e40af)",padding:"14px 16px",display:"flex",alignItems:"center",gap:12}}>
           <div style={{width:36,height:36,background:"rgba(255,255,255,0.15)",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>🏫</div>
           <div><div style={{fontSize:14,fontWeight:700,color:"#fff"}}>{schoolName}</div><div style={{fontSize:10,color:"rgba(255,255,255,0.6)",marginTop:2}}>{schoolTagline}</div></div>
         </div>
         {/* Body */}
-        <div style={{padding:"18px 16px",display:"flex",gap:14,alignItems:"flex-start"}}>
-          <img src={student.photo} alt="" style={{width:78,height:78,borderRadius:12,border:"2px solid rgba(59,130,246,0.5)",objectFit:"cover",flexShrink:0}}/>
+        <div style={{padding:"16px",display:"flex",gap:14,alignItems:"flex-start"}}>
+          <img src={student.photo} alt="" style={{width:82,height:90,borderRadius:10,border:"2px solid rgba(59,130,246,0.5)",objectFit:"cover",flexShrink:0}}/>
           <div style={{flex:1}}>
-            <div style={{fontSize:15,fontWeight:700,color:"#fff",marginBottom:3}}>{student.name}</div>
-            <div style={{fontSize:11,color:"#60a5fa",fontFamily:"monospace",marginBottom:8}}>Roll No: {student.rollNo}</div>
+            <div style={{fontSize:15,fontWeight:700,color:"#fff",marginBottom:2}}>{student.name}</div>
+            <div style={{fontSize:11,color:"#60a5fa",fontFamily:"monospace",marginBottom:7}}>Roll No: {student.rollNo}</div>
             {[["Class",cls?cls.name+"-"+cls.section:"—"],["Blood Group",bloodGroup],["Year",String(new Date().getFullYear())]].map(([k,v])=>(
-              <div key={k} style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}>
+              <div key={k} style={{display:"flex",justifyContent:"space-between",fontSize:10.5,marginBottom:3}}>
                 <span style={{color:"rgba(255,255,255,0.45)"}}>{k}</span>
                 <span style={{color:"rgba(255,255,255,0.9)",fontWeight:500}}>{v}</span>
               </div>
             ))}
           </div>
         </div>
-        {/* Footer with QR */}
+        {/* Contact info section */}
+        {(parentName||phone||address)&&(
+          <>
+            <div style={{borderTop:"1px solid rgba(255,255,255,0.07)",margin:"0 16px"}}/>
+            <div style={{padding:"10px 16px"}}>
+              {parentName&&<div style={{display:"flex",gap:6,fontSize:10.5,marginBottom:4,alignItems:"flex-start"}}>
+                <span style={{color:"rgba(255,255,255,0.4)",flexShrink:0}}>Custodian</span>
+                <span style={{color:"rgba(255,255,255,0.85)",fontWeight:500,marginLeft:"auto",textAlign:"right"}}>{parentName}</span>
+              </div>}
+              {phone&&<div style={{display:"flex",gap:6,fontSize:10.5,marginBottom:4,alignItems:"flex-start"}}>
+                <span style={{color:"rgba(255,255,255,0.4)",flexShrink:0}}>Phone</span>
+                <span style={{color:"rgba(255,255,255,0.85)",fontWeight:500,marginLeft:"auto",fontFamily:"monospace"}}>{phone}</span>
+              </div>}
+              {address&&<div style={{display:"flex",gap:6,fontSize:10.5,alignItems:"flex-start"}}>
+                <span style={{color:"rgba(255,255,255,0.4)",flexShrink:0}}>Address</span>
+                <span style={{color:"rgba(255,255,255,0.85)",fontWeight:500,marginLeft:"auto",textAlign:"right",maxWidth:220}}>{address}</span>
+              </div>}
+            </div>
+          </>
+        )}
+        {/* Footer */}
         <div style={{padding:"10px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",borderTop:"1px solid rgba(255,255,255,0.08)"}}>
           <div style={{background:"rgba(59,130,246,0.12)",border:"1px solid rgba(59,130,246,0.3)",borderRadius:8,padding:"6px 14px",textAlign:"center"}}>
             <div style={{fontSize:9,color:"#60a5fa",textTransform:"uppercase",letterSpacing:1}}>Student ID</div>
             <div style={{fontSize:15,fontWeight:700,color:"#fff",marginTop:2,fontFamily:"monospace"}}>{student.rollNo}</div>
           </div>
-          <img src={qrUrl} alt="QR" style={{width:80,height:80,borderRadius:8}}/>
+          <img src={qrUrl} alt="QR" style={{width:78,height:78,borderRadius:8}}/>
         </div>
       </div>
+      {!(parentName||phone||address)&&(
+        <p className="text-white/30 text-xs text-center">Add phone, address & parent name in profile to show on ID card</p>
+      )}
       {/* Action buttons */}
       <div className="flex gap-3">
         <button onClick={downloadCard} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-sm px-5 py-2.5 rounded-xl transition-colors font-medium"><Download size={14}/>Download / Print ID Card</button>
@@ -755,11 +803,14 @@ function StudentIDCard({student,cls,schoolName,schoolTagline,onClose}:{student:S
 }
 
 // ─── Teacher Profile Modal ────────────────────────────────────────────────────
-function TeacherProfileModal({teacher,state,onSave,onClose}:{teacher:Teacher;state:AppState;onSave:(t:Teacher)=>void;onClose:()=>void}){
+function TeacherProfileModal({teacher,state,onSave,onClose,isAdmin=false}:{teacher:Teacher;state:AppState;onSave:(t:Teacher)=>void;onClose:()=>void;isAdmin?:boolean}){
   const d=decProfile(teacher.profile);
   const [name,setName]=useState(teacher.name);
   const [email,setEmail]=useState(teacher.email);
   const [photo,setPhoto]=useState(teacher.photo||"");
+  // PHASE 2: role toggles
+  const [isCounselor,setIsCounselor]=useState(teacher.is_counselor||false);
+  const [isBursar,setIsBursar]=useState(teacher.is_bursar||false);
   const [form,setForm]=useState({dob:d.dob||"",gender:d.gender||"",phone:d.phone||"",address:d.address||"",qualification:d.qualification||"",specialization:d.specialization||"",joinDate:d.joinDate||"",nic:d.nic||""});
   const set=(k:keyof typeof form)=>(v:string)=>setForm(f=>({...f,[k]:v}));
   function handlePhoto(e:React.ChangeEvent<HTMLInputElement>){
@@ -771,7 +822,7 @@ function TeacherProfileModal({teacher,state,onSave,onClose}:{teacher:Teacher;sta
   }
   function save(){
     const enc=encProfile(form);
-    const updated:Teacher={...teacher,name:name.trim()||teacher.name,email:email.trim()||teacher.email,profile:enc,...(photo?{photo}:{})};
+    const updated:Teacher={...teacher,name:name.trim()||teacher.name,email:email.trim()||teacher.email,profile:enc,...(photo?{photo}:{}),is_counselor:isCounselor,is_bursar:isBursar};
     try{localStorage.setItem(`teacher_profile_${teacher.id}`,JSON.stringify(enc));}catch{}
     onSave(updated);
     onClose();
@@ -779,24 +830,30 @@ function TeacherProfileModal({teacher,state,onSave,onClose}:{teacher:Teacher;sta
   return(
     <div className="bg-[#080D18] border border-white/10 rounded-2xl p-6 w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto">
       <div className="flex items-center gap-3 mb-5">
-        <label className="cursor-pointer group relative flex-shrink-0">
-          {photo
-            ?<img src={photo} className="w-16 h-16 rounded-xl border border-white/10 object-cover"/>
-            :<div className="w-16 h-16 rounded-xl bg-gradient-to-br from-purple-500/30 to-blue-500/30 border border-white/10 flex items-center justify-center text-white font-bold text-2xl">{(name||teacher.name)[0]}</div>
-          }
-          <div className="absolute inset-0 bg-black/60 rounded-xl opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center transition-opacity gap-1">
-            <Upload size={16} className="text-white"/>
-            <span className="text-white text-[9px] font-medium">PHOTO</span>
+        <div className="flex flex-col items-center gap-1 flex-shrink-0">
+          <div className="relative">
+            {photo
+              ?<img src={photo} className="w-16 h-16 rounded-xl border border-white/10 object-cover"/>
+              :<div className="w-16 h-16 rounded-xl bg-gradient-to-br from-purple-500/30 to-blue-500/30 border border-white/10 flex items-center justify-center text-white font-bold text-2xl">{(name||teacher.name)[0]}</div>
+            }
+            <label className="absolute -bottom-1 -right-1 w-6 h-6 bg-blue-600 hover:bg-blue-500 rounded-full flex items-center justify-center cursor-pointer shadow-lg border-2 border-[#080D18]">
+              <Upload size={10} className="text-white"/>
+              <input type="file" accept="image/*" className="hidden" onChange={handlePhoto}/>
+            </label>
           </div>
-          <input type="file" accept="image/*" className="hidden" onChange={handlePhoto}/>
-        </label>
+          <label className="text-[10px] text-blue-400 underline cursor-pointer">
+            {photo?"Change":"Add Photo"}
+            <input type="file" accept="image/*" className="hidden" onChange={handlePhoto}/>
+          </label>
+        </div>
         <div className="flex-1 min-w-0">
           <input value={name} onChange={e=>setName(e.target.value)} className="w-full bg-transparent text-white font-bold text-sm outline-none border-b border-white/10 focus:border-blue-500/50 pb-0.5 mb-1"/>
           <input value={email} onChange={e=>setEmail(e.target.value)} className="w-full bg-transparent text-white/40 text-xs outline-none border-b border-white/10 focus:border-blue-500/50 pb-0.5"/>
         </div>
         <button onClick={onClose} className="ml-2 text-white/30 hover:text-white/60 transition-colors flex-shrink-0"><X size={16}/></button>
       </div>
-      <div className="flex items-center gap-1.5 text-xs text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 rounded-lg px-3 py-2 mb-5"><Shield size={11}/>PII is encrypted before saving</div>
+      <div className="flex items-center gap-1.5 text-xs text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 rounded-lg px-3 py-2 mb-4"><Shield size={11}/>PII is encrypted before saving</div>
+      {isAdmin&&(<div className="grid grid-cols-2 gap-3 mb-4"><button type="button" onClick={()=>setIsCounselor(v=>!v)} className={`flex items-center justify-center gap-2 py-2.5 rounded-xl border text-sm font-medium transition-all ${isCounselor?"bg-purple-600 border-purple-500 text-white":"border-white/10 text-white/40 hover:border-purple-500/40 hover:text-purple-400"}`}><HeartHandshake size={14}/>Counselor</button><button type="button" onClick={()=>setIsBursar(v=>!v)} className={`flex items-center justify-center gap-2 py-2.5 rounded-xl border text-sm font-medium transition-all ${isBursar?"bg-emerald-600 border-emerald-500 text-white":"border-white/10 text-white/40 hover:border-emerald-500/40 hover:text-emerald-400"}`}><DollarSign size={14}/>Bursar</button></div>)}
       <div className="grid grid-cols-2 gap-3">
         {([["Date of Birth","dob","date"],["Gender","gender","text"],["Phone","phone","tel"],["NIC","nic","text"],["Qualification","qualification","text"],["Specialization","specialization","text"],["Join Date","joinDate","date"],["Address","address","text"]] as [string,keyof typeof form,string][]).map(([label,key,type])=>(
           <div key={key} className={key==="address"?"col-span-2":""}>
@@ -1542,7 +1599,16 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
                 <div key={cls.id} className="bg-[#080D18] border border-white/5 rounded-xl p-5 hover:border-blue-500/30 transition-all">
                   <div className="flex items-start justify-between mb-4">
                     <div className="w-12 h-12 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center"><span className="text-base font-bold text-blue-400">{cls.name}{cls.section}</span></div>
-                    {!isSA&&<button onClick={async()=>{upd(s=>({...s,classes:s.classes.filter(c=>c.id!==cls.id)}));try{await sb.delete("classes",cls.id);}catch(e){console.warn("[sb.classes delete]",e);}}} className="text-white/20 hover:text-red-400 transition-colors"><Trash2 size={14}/></button>}
+                    {!isSA&&(
+                      <div className="flex gap-2">
+                        <button onClick={()=>setPopup({type:"editClass",data:cls})} className="text-white/20 hover:text-blue-400 transition-colors" title="Edit Class Teacher"><Edit2 size={14}/></button>
+                        <button onClick={async()=>{
+                          if(!confirm(`Delete class ${cls.name}-${cls.section}? Students will be unassigned but NOT deleted.`)) return;
+                          upd(s=>({...s,classes:s.classes.filter(c=>c.id!==cls.id)}));
+                          try{await sb.delete("classes",cls.id);}catch(e){console.warn("[sb.classes delete]",e);}
+                        }} className="text-white/20 hover:text-red-400 transition-colors" title="Delete class (students preserved)"><Trash2 size={14}/></button>
+                      </div>
+                    )}
                   </div>
                   <div className="text-white font-semibold">Class {cls.name} – {cls.section}</div>
                   <div className="text-xs text-white/40 mt-1">Class Teacher: {teacher?.name||"Unassigned"}</div>
@@ -1565,7 +1631,7 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
           </div>
           <div className="bg-[#080D18] border border-white/5 rounded-xl overflow-hidden overflow-x-auto">
             <table className="w-full">
-              <thead><tr className="border-b border-white/5">{["Code","Subject","Classes","Teacher",""].map(h=><th key={h} className="text-left text-xs font-semibold text-white/40 uppercase tracking-wider px-4 py-3">{h}</th>)}</tr></thead>
+              <thead><tr className="border-b border-white/5">{["Code","Subject","Category","Classes","Teacher",""].map(h=><th key={h} className="text-left text-xs font-semibold text-white/40 uppercase tracking-wider px-4 py-3">{h}</th>)}</tr></thead>
               <tbody>{state.subjects.map(sub=>{
                 const teacher=state.teachers.find(t=>t.id===sub.teacherId);
                 const classes=state.classes.filter(c=>sub.classIds.includes(c.id));
@@ -1573,6 +1639,7 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
                   <tr key={sub.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
                     <td className="px-4 py-3"><span className="font-mono text-xs text-blue-400 bg-blue-500/10 px-2 py-1 rounded">{sub.code}</span></td>
                     <td className="px-4 py-3 text-sm text-white">{sub.name}</td>
+                    <td className="px-4 py-3"><span className="text-xs px-2 py-1 rounded bg-white/5 text-white/50">{sub.category||"General"}</span></td>
                     <td className="px-4 py-3"><div className="flex gap-1 flex-wrap">{classes.map(c=><span key={c.id} className="text-xs bg-white/5 text-white/50 px-2 py-0.5 rounded">{c.name}-{c.section}</span>)}</div></td>
                     <td className="px-4 py-3 text-sm text-white/60">{teacher?.name||"–"}</td>
                     <td className="px-4 py-3"><button onClick={async()=>{upd(s=>({...s,subjects:s.subjects.filter(x=>x.id!==sub.id)}));try{await sb.delete("subjects",sub.id);}catch(e){console.warn("[sb.subjects delete]",e);}}} className="text-white/20 hover:text-red-400 transition-colors"><Trash2 size={14}/></button></td>
@@ -1615,11 +1682,12 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
                       {d.phone&&<div className="text-xs text-white/25 flex items-center gap-1 mt-0.5"><Phone size={9}/>{d.phone}</div>}
                     </div>
                     <div className="flex gap-1.5 ml-auto">
-                      <button onClick={()=>setEditTch(t)} className="text-white/20 hover:text-blue-400 transition-colors p-1" title="Edit Profile"><User size={13}/></button>
+                      <button onClick={()=>setEditTch(t)} className="flex items-center gap-1.5 text-xs border border-blue-500/30 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 px-2.5 py-1.5 rounded-lg transition-colors font-medium" title="Edit Profile"><Edit2 size={12}/>Edit</button>
                       {!isSA&&<button onClick={()=>db.deleteTeacher(t.id)} className="text-white/20 hover:text-red-400 transition-colors p-1"><Trash2 size={14}/></button>}
                     </div>
                   </div>
-                  {ownCls.length>0&&<div className="mb-3"><span className="text-xs bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full">Class Teacher: {ownCls.map(c=>`${c.name}-${c.section}`).join(", ")}</span></div>}
+                  {ownCls.length>0&&<div className="mb-2"><span className="text-xs bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full">Class Teacher: {ownCls.map(c=>`${c.name}-${c.section}`).join(", ")}</span></div>}
+                  {(t.is_counselor||t.is_bursar)&&<div className="flex gap-1.5 flex-wrap mb-2">{t.is_counselor&&<span className="text-xs bg-purple-500/20 text-purple-300 border border-purple-500/30 px-2 py-0.5 rounded-full flex items-center gap-1"><HeartHandshake size={10}/>Counselor</span>}{t.is_bursar&&<span className="text-xs bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full flex items-center gap-1"><DollarSign size={10}/>Bursar</span>}</div>}
                   {(d.qualification||d.specialization)&&<div className="text-xs text-white/30 mb-2">{d.qualification}{d.specialization&&` · ${d.specialization}`}</div>}
                   <div className="space-y-2">
                     <div><div className="text-xs text-white/30 mb-1">Subjects</div><div className="flex gap-1 flex-wrap">{subs.map(s=><span key={s.id} className="text-xs font-mono bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded">{s.code}</span>)}</div></div>
@@ -1849,7 +1917,10 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
     if(!popup)return null;
     const close=()=>setPopup(null);
     if(popup.type==="addClass"){let n="",sec="",tid="";return<Modal title="Add Class" onClose={close}><Field label="Class Name" onChange={v=>n=v}/><Field label="Section" onChange={v=>sec=v}/><SelField label="Class Teacher" options={state.teachers.map(t=>({value:t.id,label:t.name}))} onChange={v=>tid=v}/><MBtn onClick={async()=>{if(n&&sec){const id=uid();upd(s=>({...s,classes:[...s.classes,{id,name:n,section:sec,teacherId:tid}]}));try{await sb.upsert("classes",{id,name:n,section:sec,teacher_id:tid||null});}catch(e){console.warn("[sb.classes]",e);}close();}}}>Create</MBtn></Modal>;}
-    if(popup.type==="addSubject"){let n="",code="",tid="";let cids:string[]=[];return<Modal title="Add Subject" onClose={close}><Field label="Subject Name" onChange={v=>n=v}/><Field label="Code" onChange={v=>code=v.toUpperCase()}/><SelField label="Teacher" options={state.teachers.map(t=>({value:t.id,label:t.name}))} onChange={v=>tid=v}/><div><label className="text-xs text-white/40 uppercase block mb-2">Classes</label><div className="flex gap-3 flex-wrap">{state.classes.map(c=><label key={c.id} className="flex items-center gap-1.5 text-sm text-white cursor-pointer"><input type="checkbox" className="accent-blue-500" onChange={e=>{if(e.target.checked)cids.push(c.id);else cids=cids.filter(x=>x!==c.id);}}/>{c.name}-{c.section}</label>)}</div></div><MBtn onClick={async()=>{if(n&&code){const id=uid();upd(s=>({...s,subjects:[...s.subjects,{id,name:n,code,classIds:cids,teacherId:tid}]}));try{await sb.upsert("subjects",{id,name:n,code,class_ids:cids,teacher_id:tid||null});}catch(e){console.warn("[sb.subjects]",e);}close();}}}>Create</MBtn></Modal>;}
+    // PHASE 1: Edit existing class teacher
+    if(popup.type==="editClass"){const cls=popup.data as Class;let tid=cls.teacherId;return<Modal title={`Edit Class ${cls.name}-${cls.section}`} onClose={close}><SelField label="Class Teacher" options={state.teachers.map(t=>({value:t.id,label:t.name}))} onChange={v=>tid=v}/><MBtn onClick={async()=>{upd(s=>({...s,classes:s.classes.map(c=>c.id===cls.id?{...c,teacherId:tid}:c)}));try{await sb.update("classes",cls.id,{teacher_id:tid||null});}catch(e){console.warn("[sb.classes update]",e);}close();}}>Save Changes</MBtn></Modal>;}
+    // PHASE 1: Added category field to addSubject
+    if(popup.type==="addSubject"){let n="",code="",tid="",cat:SubjectCategory="General";let cids:string[]=[];return<Modal title="Add Subject" onClose={close}><Field label="Subject Name" onChange={v=>n=v}/><Field label="Code" onChange={v=>code=v.toUpperCase()}/><SelField label="Category" options={(["General","Science","Arts","Commerce"] as SubjectCategory[]).map(c=>({value:c,label:c}))} onChange={v=>cat=v as SubjectCategory}/><SelField label="Teacher" options={state.teachers.map(t=>({value:t.id,label:t.name}))} onChange={v=>tid=v}/><div><label className="text-xs text-white/40 uppercase block mb-2">Classes</label><div className="flex gap-3 flex-wrap">{state.classes.map(c=><label key={c.id} className="flex items-center gap-1.5 text-sm text-white cursor-pointer"><input type="checkbox" className="accent-blue-500" onChange={e=>{if(e.target.checked)cids.push(c.id);else cids=cids.filter(x=>x!==c.id);}}/>{c.name}-{c.section}</label>)}</div></div><MBtn onClick={async()=>{if(n&&code){const id=uid();upd(s=>({...s,subjects:[...s.subjects,{id,name:n,code,classIds:cids,teacherId:tid,category:cat}]}));try{await sb.upsert("subjects",{id,name:n,code,class_ids:cids,teacher_id:tid||null});}catch(e){console.warn("[sb.subjects]",e);}close();}}}>Create</MBtn></Modal>;}
     if(popup.type==="addTeacher"){let n="",e="",p="";return<Modal title="Add Teacher" onClose={close}><Field label="Full Name" onChange={v=>n=v}/><Field label="Email" onChange={v=>e=v}/><Field label="Password" onChange={v=>p=v}/><MBtn onClick={()=>{if(n&&e){const t:Teacher={id:uid(),name:n,email:e,subjectIds:[],classIds:[],password:p};db.addTeacher(t);close();}}}>Add</MBtn></Modal>;}
     if(popup.type==="addStudent"){let n="",r="",cid=state.classes[0]?.id||"",p="";return<Modal title="Add Student" onClose={close}><Field label="Full Name" onChange={v=>n=v}/><Field label="Roll Number" onChange={v=>r=v}/><Field label="Password" onChange={v=>p=v}/><SelField label="Class" options={state.classes.map(c=>({value:c.id,label:`Class ${c.name}-${c.section}`}))} onChange={v=>cid=v}/><MBtn onClick={()=>{if(n&&r){const s:Student={id:uid(),name:n,rollNo:r,classId:cid,photo:`https://api.dicebear.com/7.x/avataaars/svg?seed=${n}`,marks:{},password:p};db.addStudent(s);close();}}}>Add</MBtn></Modal>;}
     if(popup.type==="addSlot"){const{day,period,classId}=popup.data;let sid="",tid="";const csubs=state.subjects.filter(s=>s.classIds.includes(classId));return<Modal title={`Slot — ${day}, P${period}`} onClose={close}><SelField label="Subject" options={csubs.map(s=>({value:s.id,label:s.name}))} onChange={v=>sid=v}/><SelField label="Teacher" options={state.teachers.map(t=>({value:t.id,label:t.name}))} onChange={v=>tid=v}/><MBtn onClick={async()=>{if(sid){const id=uid();upd(s=>({...s,timetable:{...s.timetable,[classId]:[...(s.timetable[classId]||[]),{day,period,subjectId:sid,teacherId:tid}]}}));try{await sb.upsert("timetable",{id,class_id:classId,day,period,subject_id:sid,teacher_id:tid||null});}catch(e){console.warn("[sb.timetable]",e);}close();}}}>Add</MBtn></Modal>;}
@@ -1862,7 +1933,7 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
       {renderTab()}
       {popup&&<div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={e=>e.target===e.currentTarget&&setPopup(null)}>{renderPopup()}</div>}
       {editSt&&<div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"><StudentProfileModal student={editSt} state={state} onSave={u=>db.updateStudent(u)} onClose={()=>setEditSt(null)}/></div>}
-      {editTch&&<div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"><TeacherProfileModal teacher={editTch} state={state} onSave={u=>db.updateTeacher(u)} onClose={()=>setEditTch(null)}/></div>}
+      {editTch&&<div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"><TeacherProfileModal teacher={editTch} state={state} onSave={u=>db.updateTeacher(u)} onClose={()=>setEditTch(null)} isAdmin/></div>}
     </Layout>
   );
 }
@@ -1899,12 +1970,22 @@ function TeacherView({user,state,setState,onLogout}:
   const myClasses  = state.classes.filter(c=>mySubjects.some(s=>s.classIds.includes(c.id)));
   const myOwnCls   = state.classes.filter(c=>c.teacherId===teacher.id);
 
+  const isClassTeacher = myOwnCls.length > 0;
+
   const NAV=[
     {id:"profile",    label:"My Profile",     icon:User},
     {id:"marks",      label:"Enter Marks",    icon:Award},
     {id:"timetable",  label:"My Schedule",    icon:Clock},
     {id:"students",   label:"My Students",    icon:Users},
     {id:"marksheet",  label:"Class Marksheet",icon:BarChart3},
+    // PHASE 3: QR Attendance — visible to all class teachers
+    ...(isClassTeacher ? [{id:"attendance", label:"QR Attendance", icon:QrCode}] : []),
+    // PHASE 2: Behavior — visible to all class teachers
+    ...(isClassTeacher ? [{id:"behavior",   label:"Behavior Log",  icon:AlertTriangle}] : []),
+    // PHASE 4: Fees — class teachers see their class; bursar sees all
+    ...(isClassTeacher || teacher.is_bursar ? [{id:"fees", label:"Fees & Finance", icon:DollarSign}] : []),
+    // PHASE 2: Counseling — only for counselors
+    ...(teacher.is_counselor ? [{id:"counseling", label:"Counseling", icon:HeartHandshake}] : []),
   ];
 
   function renderTab(){
@@ -2143,6 +2224,138 @@ function TeacherView({user,state,setState,onLogout}:
           )}
         </div>
       );
+
+      // PHASE 3: QR Attendance for class teachers
+      case "attendance": {
+        const todayDate = new Date().toISOString().split("T")[0];
+        const [qrVal, setQrVal] = React.useState("");
+        const [lastScanned, setLastScanned] = React.useState<Student|null>(null);
+        const myStudents = state.students.filter(s=>myOwnCls.some(c=>c.id===s.classId));
+        function markPresent(rollOrQr: string){
+          const roll=rollOrQr.trim().replace(/^STUDENT:[^:]+:/,"").replace(/^STUDENT:/,"");
+          const st=myStudents.find(s=>s.rollNo===roll||s.rollNo===rollOrQr.trim());
+          if(!st) return;
+          setState(s=>({...s,attendance:{...s.attendance,[todayDate]:{...(s.attendance[todayDate]||{}),[st.rollNo]:true}}}));
+          setLastScanned(st); setQrVal(""); setTimeout(()=>setLastScanned(null),3000);
+        }
+        React.useEffect(()=>{
+          const buf={val:""}; let timer:ReturnType<typeof setTimeout>;
+          function onKey(e:KeyboardEvent){
+            if((e.target as HTMLElement).tagName==="INPUT") return;
+            if(e.key==="Enter"){if(buf.val.length>2) markPresent(buf.val); buf.val=""; clearTimeout(timer);}
+            else if(e.key.length===1){buf.val+=e.key; clearTimeout(timer); timer=setTimeout(()=>{buf.val="";},200);}
+          }
+          window.addEventListener("keydown",onKey);
+          return()=>{window.removeEventListener("keydown",onKey); clearTimeout(timer);};
+        },[state.students,state.attendance]);
+        return(
+          <div className="space-y-5 max-w-2xl">
+            <div><h2 className="text-xl font-bold text-white">QR Attendance</h2><p className="text-white/30 text-xs mt-0.5">Hybrid: manual input + USB/Bluetooth barcode scanner support</p></div>
+            <div className="bg-[#080D18] border border-white/5 rounded-2xl p-5 space-y-4">
+              <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2.5"><Wifi size={12}/><span>USB/Bluetooth scanners: click outside the input box and scan directly</span></div>
+              <div><label className="text-xs text-white/40 uppercase tracking-wider block mb-2">Roll Number / QR</label>
+                <div className="flex gap-2">
+                  <input value={qrVal} onChange={e=>setQrVal(e.target.value)} onKeyDown={e=>e.key==="Enter"&&markPresent(qrVal)} placeholder="Type roll number or scan…" className="flex-1 bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 font-mono placeholder-white/20"/>
+                  <button onClick={()=>markPresent(qrVal)} className="bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-2.5 rounded-xl transition-colors flex items-center gap-2"><Check size={14}/>Mark</button>
+                </div>
+              </div>
+              {lastScanned&&<div className="flex items-center gap-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl px-4 py-3"><CheckCircle size={16} className="text-emerald-400"/><div><div className="text-sm font-medium text-emerald-300">{lastScanned.name} marked present</div><div className="text-xs text-emerald-400/60">Roll: {lastScanned.rollNo}</div></div></div>}
+            </div>
+            <div className="bg-[#080D18] border border-white/5 rounded-xl overflow-hidden">
+              <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between"><span className="text-xs font-semibold text-white/50 uppercase">Today — {todayDate}</span><span className="text-xs text-white/30">{myStudents.filter(s=>state.attendance[todayDate]?.[s.rollNo]).length}/{myStudents.length} Present</span></div>
+              <div className="divide-y divide-white/5">{myStudents.map(s=>{
+                const present=state.attendance[todayDate]?.[s.rollNo];
+                return(<div key={s.id} className="flex items-center justify-between px-4 py-3"><div className="flex items-center gap-2"><img src={s.photo} className="w-7 h-7 rounded-full"/><span className="text-sm text-white">{s.name}</span><span className="text-xs text-white/30 font-mono">{s.rollNo}</span></div>
+                  <button onClick={()=>setState(st=>({...st,attendance:{...st.attendance,[todayDate]:{...(st.attendance[todayDate]||{}),[s.rollNo]:!present}}}))} className={`text-xs px-3 py-1.5 rounded-full font-medium transition-all ${present?"bg-emerald-500/20 text-emerald-400 border border-emerald-500/30":"bg-red-500/10 text-red-400/60 border border-red-500/10 hover:border-emerald-500/30 hover:text-emerald-400"}`}>{present?"Present":"Absent"}</button>
+                </div>);
+              })}</div>
+            </div>
+          </div>
+        );
+      }
+
+      // PHASE 2: Behavior for class teachers (read-only)
+      case "behavior": {
+        const myStudentIds=state.students.filter(s=>myOwnCls.some(c=>c.id===s.classId)).map(s=>s.id);
+        const myBehaviorRecs=state.behavior.records.filter(r=>myStudentIds.includes(r.studentId));
+        return(
+          <div className="space-y-4 max-w-3xl">
+            <h2 className="text-xl font-bold text-white">Behavior Log</h2>
+            <div className="text-xs text-white/30 bg-white/3 border border-white/5 rounded-lg px-3 py-2">Showing records for your classes. Contact admin to add or modify entries.</div>
+            {myBehaviorRecs.length===0?<div className="bg-[#080D18] border border-white/5 rounded-xl p-8 text-center text-white/20 text-sm">No behavior records for your classes yet.</div>:(
+              <div className="space-y-3">{myBehaviorRecs.map(rec=>{const st=state.students.find(s=>s.id===rec.studentId);return(
+                <div key={rec.id} className={`bg-[#080D18] border rounded-xl p-4 ${rec.type==="positive"?"border-emerald-500/20":"border-red-500/10"}`}>
+                  <div className="flex items-start gap-3">{st&&<img src={st.photo} className="w-8 h-8 rounded-full"/>}
+                    <div className="flex-1"><div className="flex items-center gap-2 flex-wrap mb-1"><span className="text-sm font-medium text-white">{st?.name}</span><span className={`text-[10px] px-2 py-0.5 rounded-full border font-medium ${rec.type==="positive"?"bg-emerald-500/20 text-emerald-400 border-emerald-500/30":"bg-red-500/15 text-red-400 border-red-500/20"}`}>{rec.severity}</span><span className="text-[10px] text-white/30">{rec.date}</span></div>
+                      <p className="text-sm text-white/60">{rec.description}</p>{rec.actionTaken&&<p className="text-xs text-white/30 mt-1">Action: {rec.actionTaken}</p>}
+                    </div>
+                  </div>
+                </div>);})}</div>
+            )}
+          </div>
+        );
+      }
+
+      // PHASE 4: Fees — class teacher sees their class; bursar sees all
+      case "fees": {
+        const isBursar=teacher.is_bursar;
+        const allowedStudents=isBursar?state.students:state.students.filter(s=>myOwnCls.some(c=>c.id===s.classId));
+        const allowedIds=allowedStudents.map(s=>s.id);
+        const feeRecords=state.fees.records.filter(r=>allowedIds.includes(r.studentId));
+        const [feeSearch,setFeeSearch]=React.useState("");
+        const filteredRecs=feeRecords.filter(r=>{const st=state.students.find(s=>s.id===r.studentId);return !feeSearch||st?.name.toLowerCase().includes(feeSearch.toLowerCase())||st?.rollNo.includes(feeSearch);});
+        const total=feeRecords.reduce((a,r)=>a+r.amount,0);
+        const paid=feeRecords.filter(r=>r.status==="paid").reduce((a,r)=>a+(r.paidAmount||r.amount),0);
+        const currency=state.settings.currency;
+        return(
+          <div className="space-y-5">
+            <div><h2 className="text-xl font-bold text-white">Fees &amp; Finance</h2><p className="text-white/30 text-xs mt-0.5">{isBursar?"Bursar view — all students":"Class teacher view — your class only"}</p></div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-[#080D18] border border-emerald-500/20 rounded-xl p-4"><div className="text-xs text-white/40 mb-1">Collected</div><div className="text-xl font-bold text-emerald-400">{currency} {paid.toLocaleString()}</div></div>
+              <div className="bg-[#080D18] border border-orange-500/20 rounded-xl p-4"><div className="text-xs text-white/40 mb-1">Outstanding</div><div className="text-xl font-bold text-orange-400">{currency} {(total-paid).toLocaleString()}</div></div>
+            </div>
+            <div className="relative"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30"/><input value={feeSearch} onChange={e=>setFeeSearch(e.target.value)} placeholder="Search student…" className="w-full pl-9 bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50"/></div>
+            <div className="bg-[#080D18] border border-white/5 rounded-xl overflow-hidden overflow-x-auto">
+              <table className="w-full"><thead><tr className="border-b border-white/5">{["Student","Category","Amount","Due","Status"].map(h=><th key={h} className="text-left text-xs text-white/40 uppercase px-4 py-3">{h}</th>)}</tr></thead>
+                <tbody>{filteredRecs.map(rec=>{const st=state.students.find(s=>s.id===rec.studentId);return(
+                  <tr key={rec.id} className="border-b border-white/5 hover:bg-white/3">
+                    <td className="px-4 py-3"><div className="flex items-center gap-2"><img src={st?.photo||""} className="w-7 h-7 rounded-full"/><span className="text-sm text-white">{st?.name}</span></div></td>
+                    <td className="px-4 py-3 text-xs text-white/50 capitalize">{rec.category}</td>
+                    <td className="px-4 py-3 text-sm font-mono text-white">{currency} {rec.amount.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-xs text-white/40">{rec.dueDate}</td>
+                    <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full border font-medium ${rec.status==="paid"?"bg-emerald-500/20 text-emerald-400 border-emerald-500/30":rec.status==="partial"?"bg-yellow-500/20 text-yellow-400 border-yellow-500/30":"bg-red-500/15 text-red-400 border-red-500/20"}`}>{rec.status}</span></td>
+                  </tr>);})}</tbody>
+              </table>
+            </div>
+          </div>
+        );
+      }
+
+      // PHASE 2: Counseling — only for is_counselor teachers
+      case "counseling": {
+        if(!teacher.is_counselor) return <div className="text-white/30 text-sm p-8 text-center">Access denied — Counselor role required.</div>;
+        const [selSt,setSelSt]=React.useState(state.students[0]?.id||"");
+        const [issue,setIssue]=React.useState(""); const [notes,setNotes]=React.useState(""); const [followUp,setFollowUp]=React.useState("");
+        const [mood,setMood]=React.useState<"good"|"neutral"|"concern"|"urgent">("neutral");
+        const profile=state.counseling.profiles.find(p=>p.studentId===selSt);
+        const sessions=profile?.sessions||[];
+        return(
+          <div className="space-y-5 max-w-2xl">
+            <h2 className="text-xl font-bold text-white">Counseling</h2>
+            <select value={selSt} onChange={e=>setSelSt(e.target.value)} className="w-full bg-[#080D18] border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none">{state.students.map(s=><option key={s.id} value={s.id}>{s.name} ({s.rollNo})</option>)}</select>
+            {profile&&<div className="bg-amber-500/5 border border-amber-500/20 rounded-xl px-4 py-3"><p className="text-sm text-white/70">{profile.background||"—"}</p>{profile.flags.length>0&&<div className="flex gap-2 mt-2 flex-wrap">{profile.flags.map(f=><span key={f} className="text-[10px] bg-amber-500/15 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full">{f}</span>)}</div>}</div>}
+            <div className="bg-[#080D18] border border-white/5 rounded-xl p-4 space-y-3">
+              <div className="text-xs font-semibold text-white/40 uppercase tracking-wider">Log New Session</div>
+              <input value={issue} onChange={e=>setIssue(e.target.value)} placeholder="Issue / Topic" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none"/>
+              <textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Session notes…" rows={3} className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none resize-none"/>
+              <input value={followUp} onChange={e=>setFollowUp(e.target.value)} placeholder="Follow-up action" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none"/>
+              <div className="flex gap-2">{(["good","neutral","concern","urgent"] as const).map(m=><button key={m} type="button" onClick={()=>setMood(m)} className={`flex-1 py-2 rounded-lg border text-xs font-medium capitalize transition-all ${mood===m?"border-blue-500/40 bg-blue-600/20 text-blue-300":"border-white/10 text-white/30"}`}>{m}</button>)}</div>
+              <button onClick={()=>{if(!issue||!notes)return;const session={id:`cs${Date.now()}`,date:new Date().toISOString().split("T")[0],issue,notes,followUp,mood};const existing=state.counseling.profiles.find(p=>p.studentId===selSt);const updated={studentId:selSt,background:existing?.background||"",sessions:[...sessions,session],flags:existing?.flags||[]};setState(s=>({...s,counseling:{profiles:s.counseling.profiles.some(p=>p.studentId===selSt)?s.counseling.profiles.map(p=>p.studentId===selSt?updated:p):[...s.counseling.profiles,updated]}}));setIssue("");setNotes("");setFollowUp("");setMood("neutral");}} className="w-full bg-blue-600 hover:bg-blue-500 text-white text-sm py-2.5 rounded-xl transition-colors flex items-center justify-center gap-2"><Save size={14}/>Save Session</button>
+            </div>
+            {sessions.length>0&&<div className="space-y-3"><div className="text-xs text-white/30 uppercase tracking-wider">Session History</div>{[...sessions].reverse().map(s=><div key={s.id} className="bg-[#080D18] border border-white/5 rounded-xl p-4"><div className="flex items-center justify-between mb-2"><span className="text-xs font-medium text-white/60">{s.issue}</span><span className="text-[10px] text-white/30">{s.date}</span></div><p className="text-sm text-white/50">{s.notes}</p></div>)}</div>}
+          </div>
+        );
+      }
 
       default: return null;
     }
@@ -2620,6 +2833,24 @@ function CounselingInner({state,setState,db}:{state:AppState;setState:(fn:(s:App
 // ═══════════════════════════════════════════════════════════════════════════════
 // FEES & FINANCE MODULE
 // ═══════════════════════════════════════════════════════════════════════════════
+// PHASE 4: Searchable student picker for fee records
+function FeeStudentPicker({students,onChange}:{students:Student[];onChange:(id:string)=>void}){
+  const [q,setQ]=useState('');
+  const filtered=students.filter(s=>!q||s.name.toLowerCase().includes(q.toLowerCase())||s.rollNo.includes(q));
+  const [sel,setSel]=useState(students[0]?.id||'');
+  useEffect(()=>onChange(students[0]?.id||''),[]);
+  return(
+    <div className='space-y-1.5'>
+      <div className='relative'><Search size={12} className='absolute left-3 top-1/2 -translate-y-1/2 text-white/30'/>
+        <input value={q} onChange={e=>setQ(e.target.value)} placeholder='Search name or roll...' className='w-full pl-8 bg-white/5 border border-white/10 text-white text-xs rounded-lg px-3 py-2 outline-none focus:border-blue-500/50'/>
+      </div>
+      <select value={sel} onChange={e=>{setSel(e.target.value);onChange(e.target.value);}} className='w-full bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none'>
+        {filtered.map(s=><option key={s.id} value={s.id}>{s.name} ({s.rollNo})</option>)}
+      </select>
+    </div>
+  );
+}
+
 function FeesModule({state,setState,db}:{state:AppState;setState:(fn:(s:AppState)=>AppState)=>void;db:DbOps}){
   return(
     <PasswordGate moduleId="fees" correctPw={state.settings.pwStaff} icon={<DollarSign size={28}/>} title="Fees & Finance" subtitle="School fee management — authorized staff only." accent="text-emerald-400">
@@ -2738,7 +2969,10 @@ function FeesInner({state,setState,db}:{state:AppState;setState:(fn:(s:AppState)
           return(
             <div className="bg-[#080D18] border border-white/10 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4">
               <div className="flex items-center justify-between"><h3 className="font-bold text-white">Add Fee Record</h3><button onClick={()=>setPopup(null)} className="text-white/30 hover:text-white/60"><X size={16}/></button></div>
-              <div><label className="text-xs text-white/40 uppercase block mb-1.5">Student</label><select onChange={e=>{sid=e.target.value;}} className="w-full bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none">{state.students.map(s=><option key={s.id} value={s.id}>{s.name} ({s.rollNo})</option>)}</select></div>
+              <div>
+                <label className="text-xs text-white/40 uppercase block mb-1.5">Student</label>
+                <FeeStudentPicker students={state.students} onChange={v=>{sid=v;}}/>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="text-xs text-white/40 uppercase block mb-1.5">Category</label><select onChange={e=>{cat=e.target.value as FeeCategory;}} className="w-full bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-3 py-2.5 outline-none">{Object.entries(CAT_LABELS).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></div>
                 <div><label className="text-xs text-white/40 uppercase block mb-1.5">Status</label><select onChange={e=>{status=e.target.value as any;}} className="w-full bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-3 py-2.5 outline-none"><option value="unpaid">Unpaid</option><option value="paid">Paid</option><option value="partial">Partial</option></select></div>
@@ -4634,18 +4868,29 @@ export default function SchoolERP() {
   // ─── Load saved state from localStorage on first render ───────────────────
   const [state,setState] = useState<AppState>(() => {
     try {
-      const saved = localStorage.getItem(STATE_KEY);
+      const saved       = localStorage.getItem(STATE_KEY);
+      // Logo always lives in its own key — never stripped by base64 size guard
+      const savedLogo   = localStorage.getItem("school_logo") || "";
+      // Settings backup: tiny key written on every change, quota-safe fallback
+      const settingsBak = localStorage.getItem("erp_settings_bak");
       if (saved) {
         const parsed = JSON.parse(saved) as AppState;
-        // Merge: use saved data but fill any missing keys from INITIAL
+        const ms: SchoolSettings = settingsBak
+          ? { ...INITIAL.settings, ...JSON.parse(settingsBak), ...parsed.settings }
+          : { ...INITIAL.settings, ...parsed.settings };
+        ms.logoUrl = savedLogo || ms.logoUrl || "";
         return { ...INITIAL, ...parsed,
-          settings:   { ...INITIAL.settings,   ...parsed.settings },
-          inventory:  { ...INITIAL.inventory,   ...parsed.inventory },
-          fees:       { ...INITIAL.fees,        ...parsed.fees },
-          behavior:   { ...INITIAL.behavior,    ...parsed.behavior },
-          counseling: { ...INITIAL.counseling,  ...parsed.counseling },
+          settings:   ms,
+          inventory:  { ...INITIAL.inventory,  ...parsed.inventory },
+          fees:       { ...INITIAL.fees,       ...parsed.fees },
+          behavior:   { ...INITIAL.behavior,   ...parsed.behavior },
+          counseling: { ...INITIAL.counseling, ...parsed.counseling },
         };
       }
+      const fallback: SchoolSettings = settingsBak
+        ? { ...INITIAL.settings, ...JSON.parse(settingsBak), logoUrl: savedLogo }
+        : { ...INITIAL.settings, logoUrl: savedLogo };
+      return { ...INITIAL, settings: fallback };
     } catch {}
     return INITIAL;
   });
@@ -4662,23 +4907,29 @@ export default function SchoolERP() {
   const update = (fn:(s:AppState)=>AppState) => {
     setState(prev => {
       const next = fn(prev);
-      // Save to localStorage immediately
+      // 1. Logo — always in its own dedicated key, isolated from state quota issues
+      try {
+        if (next.settings.logoUrl) localStorage.setItem("school_logo", next.settings.logoUrl);
+        else localStorage.removeItem("school_logo");
+      } catch {}
+      // 2. Settings backup — tiny JSON without logo, never hits quota, used as reload fallback
+      try { localStorage.setItem("erp_settings_bak", JSON.stringify({...next.settings, logoUrl:""})); } catch {}
+      // 3. Full state — strip base64 logo (already safe in school_logo key)
       try {
         const toSave = next.settings.logoUrl?.startsWith("data:")
           ? { ...next, settings: { ...next.settings, logoUrl: "" } }
           : next;
         localStorage.setItem(STATE_KEY, JSON.stringify(toSave));
       } catch {}
-      // Debounce Supabase config save (saves subjects, classes, timetable, settings)
+      // 4. Debounce Supabase config save
       if (configSaveTimer.current) clearTimeout(configSaveTimer.current);
       configSaveTimer.current = setTimeout(() => {
-        const config = {
+        sb.saveConfig({
           subjects:  next.subjects,
           classes:   next.classes,
           timetable: next.timetable,
           settings:  { ...next.settings, logoUrl: next.settings.logoUrl?.startsWith("data:") ? "" : (next.settings.logoUrl || "") },
-        };
-        sb.saveConfig(config);
+        });
       }, 800);
       return next;
     });
@@ -4720,7 +4971,15 @@ export default function SchoolERP() {
         subjects:  config?.subjects  ?? prev.subjects,
         classes:   config?.classes   ?? prev.classes,
         timetable: config?.timetable ?? prev.timetable,
-        settings:  config?.settings  ? { ...prev.settings, ...config.settings } : prev.settings,
+        // Protect sensitive/local-only fields from Supabase overwrite
+        settings:  config?.settings  ? {
+          ...prev.settings,
+          ...config.settings,
+          logoUrl:      prev.settings.logoUrl,       // logo is local-only (stripped from config)
+          pwAdmin:      prev.settings.pwAdmin,       // passwords are local-only
+          pwCounselor:  prev.settings.pwCounselor,
+          pwStaff:      prev.settings.pwStaff,
+        } : prev.settings,
         students:  students.length  ? students.map(dbToStudent)  : prev.students,
         teachers:  teachers.length  ? teachers.map(dbToTeacher)  : prev.teachers,
         inventory: {
