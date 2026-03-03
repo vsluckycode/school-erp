@@ -529,17 +529,34 @@ function downloadTeacherTimetablePDF(teacher:Teacher, state:AppState){
 // ─── Student Profile Modal ────────────────────────────────────────────────────
 function StudentProfileModal({student,state,onSave,onClose}:{student:Student;state:AppState;onSave:(s:Student)=>void;onClose:()=>void}){
   const d=decProfile(student.profile);
+  const [sName,setSName]=useState(student.name);
+  const [sRoll,setSRoll]=useState(student.rollNo);
+  const [sClass,setSClass]=useState(student.classId);
   const [form,setForm]=useState({dob:d.dob||"",gender:d.gender||"",phone:d.phone||"",address:d.address||"",parentName:d.parentName||"",parentPhone:d.parentPhone||"",bloodGroup:d.bloodGroup||"",nic:d.nic||""});
   const set=(k:keyof typeof form)=>(v:string)=>setForm(f=>({...f,[k]:v}));
   const cls=state.classes.find(c=>c.id===student.classId);
   const [showIDCard,setShowIDCard]=useState(false);
-  function save(){const enc=encProfile(form);onSave({...student,profile:enc});onClose();}
+  function save(){
+    const enc=encProfile(form);
+    const updated:Student={...student,name:sName.trim()||student.name,rollNo:sRoll.trim()||student.rollNo,classId:sClass,profile:enc};
+    try{localStorage.setItem(`student_profile_${student.id}`,JSON.stringify(enc));}catch{}
+    onSave(updated);
+    onClose();
+  }
   return(
     <div className="bg-[#080D18] border border-white/10 rounded-2xl p-6 w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto">
       <div className="flex items-center gap-3 mb-5">
         <img src={student.photo} className="w-12 h-12 rounded-xl border border-white/10"/>
-        <div><div className="text-white font-bold">{student.name}</div><div className="text-xs text-white/40">Roll {student.rollNo} · {cls?.name}-{cls?.section}</div></div>
-        <button onClick={onClose} className="ml-auto text-white/30 hover:text-white/60 transition-colors"><X size={16}/></button>
+        <div className="flex-1 min-w-0 space-y-1">
+          <input value={sName} onChange={e=>setSName(e.target.value)} className="w-full bg-transparent text-white font-bold text-sm outline-none border-b border-white/10 focus:border-blue-500/50 pb-0.5"/>
+          <div className="flex gap-2">
+            <input value={sRoll} onChange={e=>setSRoll(e.target.value)} placeholder="Roll No" className="w-24 bg-transparent text-white/40 text-xs font-mono outline-none border-b border-white/10 focus:border-blue-500/50 pb-0.5"/>
+            <select value={sClass} onChange={e=>setSClass(e.target.value)} className="flex-1 bg-[#05080F] border border-white/10 text-white/40 text-xs rounded px-2 py-0.5 outline-none">
+              {state.classes.map(c=><option key={c.id} value={c.id}>Class {c.name}-{c.section}</option>)}
+            </select>
+          </div>
+        </div>
+        <button onClick={onClose} className="ml-2 text-white/30 hover:text-white/60 transition-colors flex-shrink-0"><X size={16}/></button>
       </div>
       <div className="flex items-center gap-1.5 text-xs text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 rounded-lg px-3 py-2 mb-5"><Shield size={11}/>PII is encrypted before saving</div>
       <div className="grid grid-cols-2 gap-3">
@@ -558,7 +575,7 @@ function StudentProfileModal({student,state,onSave,onClose}:{student:Student;sta
       <div className="flex gap-2 mt-5">
         <button onClick={()=>setShowIDCard(true)} className="flex items-center gap-2 border border-blue-500/30 text-blue-400 hover:bg-blue-500/10 text-sm px-4 py-2.5 rounded-xl transition-colors"><CreditCard size={14}/>ID Card</button>
         <button onClick={onClose} className="flex-1 border border-white/10 text-white/60 text-sm py-2.5 rounded-xl hover:bg-white/5 transition-colors">Cancel</button>
-        <button onClick={save} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white text-sm py-2.5 rounded-xl transition-colors flex items-center justify-center gap-2"><Save size={14}/>Save Encrypted</button>
+        <button onClick={save} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white text-sm py-2.5 rounded-xl transition-colors flex items-center justify-center gap-2"><Save size={14}/>Save</button>
       </div>
       {showIDCard&&(
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4" onClick={e=>e.target===e.currentTarget&&setShowIDCard(false)}>
@@ -675,15 +692,27 @@ function StudentIDCard({student,cls,schoolName,schoolTagline,onClose}:{student:S
 // ─── Teacher Profile Modal ────────────────────────────────────────────────────
 function TeacherProfileModal({teacher,state,onSave,onClose}:{teacher:Teacher;state:AppState;onSave:(t:Teacher)=>void;onClose:()=>void}){
   const d=decProfile(teacher.profile);
+  const [name,setName]=useState(teacher.name);
+  const [email,setEmail]=useState(teacher.email);
   const [form,setForm]=useState({dob:d.dob||"",gender:d.gender||"",phone:d.phone||"",address:d.address||"",qualification:d.qualification||"",specialization:d.specialization||"",joinDate:d.joinDate||"",nic:d.nic||""});
   const set=(k:keyof typeof form)=>(v:string)=>setForm(f=>({...f,[k]:v}));
-  function save(){const enc=encProfile(form);onSave({...teacher,profile:enc});onClose();}
+  function save(){
+    const enc=encProfile(form);
+    const updated:Teacher={...teacher,name:name.trim()||teacher.name,email:email.trim()||teacher.email,profile:enc};
+    // persist profile to localStorage as fallback in case Supabase profile column missing
+    try{const key=`teacher_profile_${teacher.id}`;localStorage.setItem(key,JSON.stringify(enc));}catch{}
+    onSave(updated);
+    onClose();
+  }
   return(
     <div className="bg-[#080D18] border border-white/10 rounded-2xl p-6 w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto">
       <div className="flex items-center gap-3 mb-5">
-        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-500/30 to-blue-500/30 border border-white/10 flex items-center justify-center text-white font-bold text-lg">{teacher.name[0]}</div>
-        <div><div className="text-white font-bold">{teacher.name}</div><div className="text-xs text-white/40">{teacher.email}</div></div>
-        <button onClick={onClose} className="ml-auto text-white/30 hover:text-white/60 transition-colors"><X size={16}/></button>
+        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-500/30 to-blue-500/30 border border-white/10 flex items-center justify-center text-white font-bold text-lg">{(name||teacher.name)[0]}</div>
+        <div className="flex-1 min-w-0">
+          <input value={name} onChange={e=>setName(e.target.value)} className="w-full bg-transparent text-white font-bold text-sm outline-none border-b border-white/10 focus:border-blue-500/50 pb-0.5 mb-1"/>
+          <input value={email} onChange={e=>setEmail(e.target.value)} className="w-full bg-transparent text-white/40 text-xs outline-none border-b border-white/10 focus:border-blue-500/50 pb-0.5"/>
+        </div>
+        <button onClick={onClose} className="ml-2 text-white/30 hover:text-white/60 transition-colors flex-shrink-0"><X size={16}/></button>
       </div>
       <div className="flex items-center gap-1.5 text-xs text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 rounded-lg px-3 py-2 mb-5"><Shield size={11}/>PII is encrypted before saving</div>
       <div className="grid grid-cols-2 gap-3">
@@ -699,7 +728,7 @@ function TeacherProfileModal({teacher,state,onSave,onClose}:{teacher:Teacher;sta
       </div>
       <div className="flex gap-2 mt-5">
         <button onClick={onClose} className="flex-1 border border-white/10 text-white/60 text-sm py-2.5 rounded-xl hover:bg-white/5 transition-colors">Cancel</button>
-        <button onClick={save} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white text-sm py-2.5 rounded-xl transition-colors flex items-center justify-center gap-2"><Save size={14}/>Save Encrypted</button>
+        <button onClick={save} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white text-sm py-2.5 rounded-xl transition-colors flex items-center justify-center gap-2"><Save size={14}/>Save</button>
       </div>
     </div>
   );
@@ -1486,8 +1515,8 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
           <div className="text-[10px] text-white/30 bg-white/3 border border-white/5 rounded-lg px-3 py-2">CSV columns: <span className="font-mono text-white/50">name, email, password, dob, gender, phone, address, qualification, specialization, join_date, nic</span></div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {state.teachers.filter(t=>t.status!=="pending").map(t=>{
-              const subs=state.subjects.filter(s=>t.subjectIds.includes(s.id));
-              const cls=state.classes.filter(c=>t.classIds.includes(c.id));
+              const subs=state.subjects.filter(s=>s.teacherId===t.id);
+              const cls=state.classes.filter(c=>subs.some(s=>s.classIds.includes(c.id)));
               const ownCls=state.classes.filter(c=>c.teacherId===t.id);
               const d=decProfile(t.profile);
               return(
@@ -1771,8 +1800,9 @@ function TeacherView({user,state,setState,onLogout}:
   );
 
   const teacher    = _teacher;  // narrowed: definitely Teacher after guard
-  const mySubjects = state.subjects.filter(s=>teacher.subjectIds.includes(s.id));
-  const myClasses  = state.classes.filter(c=>teacher.classIds.includes(c.id));
+  // Derive from subjects/classes (always in sync, not stale stored arrays)
+  const mySubjects = state.subjects.filter(s=>s.teacherId===teacher.id);
+  const myClasses  = state.classes.filter(c=>mySubjects.some(s=>s.classIds.includes(c.id)));
   const myOwnCls   = state.classes.filter(c=>c.teacherId===teacher.id);
 
   const NAV=[
@@ -4546,17 +4576,25 @@ export default function SchoolERP() {
 
   // ─── Row mappers: DB snake_case → app camelCase ────────────────────────────
   function dbToStudent(r: any): Student {
+    let profile = r.profile || undefined;
+    if (!profile) {
+      try { const p = localStorage.getItem(`student_profile_${r.id}`); if(p) profile = JSON.parse(p); } catch {}
+    }
     return { id: r.id, name: r.name, rollNo: r.roll_no, classId: r.class_id,
       photo: r.photo || `https://api.dicebear.com/7.x/avataaars/svg?seed=${r.name}`,
       marks: r.marks || {}, password: r.password || "changeme",
       status: r.status || undefined,
-      profile: r.profile || undefined };
+      profile };
   }
   function dbToTeacher(r: any): Teacher {
+    let profile = r.profile || undefined;
+    if (!profile) {
+      try { const p = localStorage.getItem(`teacher_profile_${r.id}`); if(p) profile = JSON.parse(p); } catch {}
+    }
     return { id: r.id, name: r.name, email: r.email, subjectIds: r.subject_ids || [],
       classIds: r.class_ids || [], password: r.password || "changeme",
       status: r.status || undefined,
-      profile: r.profile || undefined };
+      profile };
   }
   function dbToItem(r: any): InventoryItem {
     return { id: r.id, name: r.name, category: r.category, quantity: r.quantity,
