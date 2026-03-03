@@ -869,13 +869,25 @@ function LoginScreen({state,db,onLogin,onRegister,onBack}:{state:AppState;db:DbO
         if(sa) onLogin({role:"support_admin",id:sa.id,name:sa.name}); else setError("Invalid credentials");
       } else if(role==="teacher"){
         const t=state.teachers.find(t=>t.email===id&&t.password===pass);
-        if(!t){ setError("Invalid email or password"); }
-        else if(t.status==="pending"){ setError("Your account is pending admin approval."); }
+        if(!t){ setError("Invalid email or password"); return; }
+        // fetch live status from DB if available
+        let liveStatus = t.status;
+        if(sb.isConfigured()){
+          const rows = await sb.select<any>("teachers", `id=eq.${t.id}`);
+          if(rows.length) liveStatus = rows[0].status || undefined;
+        }
+        if(liveStatus==="pending"){ setError("Your account is pending admin approval."); }
         else { onLogin({role:"teacher",id:t.id,name:t.name}); }
       } else {
         const s=state.students.find(s=>s.rollNo===id&&s.password===pass);
-        if(!s){ setError("Invalid roll number or password"); }
-        else if(s.status==="pending"){ setError("Your account is pending admin approval."); }
+        if(!s){ setError("Invalid roll number or password"); return; }
+        // fetch live status from DB if available
+        let liveStatus = s.status;
+        if(sb.isConfigured()){
+          const rows = await sb.select<any>("students", `id=eq.${s.id}`);
+          if(rows.length) liveStatus = rows[0].status || undefined;
+        }
+        if(liveStatus==="pending"){ setError("Your account is pending admin approval."); }
         else { onLogin({role:"student",id:s.id,name:s.name}); }
       }
     } finally {
