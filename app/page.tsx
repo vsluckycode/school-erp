@@ -1440,70 +1440,6 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
   const [editTch,setEditTch]   = useState<Teacher|null>(null);
   const upd = setState;
 
-  // QR Attendance state for AdminView
-  const [qrVal,setQrVal]                 = useState("");
-  const [cameraActive,setCameraActive]   = useState(false);
-  const [scanFeedback,setScanFeedback]   = useState<{type:"success"|"error"|"duplicate";msg:string}|null>(null);
-  const [camError,setCamError]           = useState("");
-  const [lastScanned,setLastScanned]     = useState<Student|null>(null);
-  const [attMode,setAttMode]             = useState<"today"|"history">("today");
-  const videoRef  = React.useRef<HTMLVideoElement>(null);
-  const canvasRef = React.useRef<HTMLCanvasElement>(null);
-  const scanLoopRef = React.useRef<number|null>(null);
-
-  // Stop camera when leaving attendance tab
-  React.useEffect(()=>{ if(tab!=="attendance"){ setCameraActive(false); } },[tab]);
-
-  // Camera lifecycle
-  React.useEffect(()=>{
-    let stream:MediaStream|null=null;
-    let active=true;
-    if(!cameraActive){ if(scanLoopRef.current) cancelAnimationFrame(scanLoopRef.current); return; }
-    (async()=>{
-      try{
-        stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
-        if(!active){stream.getTracks().forEach(t=>t.stop());return;}
-        if(videoRef.current){ videoRef.current.srcObject=stream; await videoRef.current.play(); }
-        setCamError("");
-        let detector:any=null;
-        try{ if((window as any).BarcodeDetector) detector=new (window as any).BarcodeDetector({formats:["qr_code"]}); }catch{}
-        if(!detector&&!(window as any).jsQR){
-          const srcs=["https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js","https://unpkg.com/jsqr@1.4.0/dist/jsQR.js"];
-          for(const src of srcs){ try{ await new Promise<void>((res,rej)=>{const s=document.createElement("script");s.src=src;s.onload=()=>res();s.onerror=()=>rej();document.head.appendChild(s);}); if((window as any).jsQR) break; }catch{} }
-        }
-        const tick=async()=>{
-          if(!active) return;
-          const v=videoRef.current; const cv=canvasRef.current;
-          if(!v||!cv){scanLoopRef.current=requestAnimationFrame(tick);return;}
-          if(v.readyState!==v.HAVE_ENOUGH_DATA){scanLoopRef.current=requestAnimationFrame(tick);return;}
-          cv.width=v.videoWidth; cv.height=v.videoHeight;
-          const ctx=cv.getContext("2d"); if(!ctx){scanLoopRef.current=requestAnimationFrame(tick);return;}
-          ctx.drawImage(v,0,0,cv.width,cv.height);
-          let decoded:string|null=null;
-          if(detector){ try{ const r=await detector.detect(cv); if(r.length>0) decoded=r[0].rawValue; }catch{} }
-          else if((window as any).jsQR){ const imgData=ctx.getImageData(0,0,cv.width,cv.height); const code=(window as any).jsQR(imgData.data,imgData.width,imgData.height,{inversionAttempts:"dontInvert"}); if(code) decoded=code.data; }
-          if(decoded){
-            const roll=decoded.trim().replace(/^STUDENT:[^:]+:/,"").replace(/^STUDENT:/,"");
-            const st=state.students.filter(s=>s.status!=="pending").find(s=>s.rollNo===roll||s.rollNo===decoded);
-            if(st){
-              if(state.attendance[new Date().toISOString().split("T")[0]]?.[st.rollNo]){ playBeep("duplicate"); setScanFeedback({type:"duplicate",msg:st.name+" already marked present"}); setTimeout(()=>setScanFeedback(null),3000); }
-              else{
-                setState(s=>({...s,attendance:{...s.attendance,[new Date().toISOString().split("T")[0]]:{...(s.attendance[new Date().toISOString().split("T")[0]]||{}),[st.rollNo]:true}}}));
-                setLastScanned(st); playBeep("success"); setScanFeedback({type:"success",msg:st.name+" marked present ✓"}); setTimeout(()=>{setScanFeedback(null);setLastScanned(null);},3000);
-                const profile=decProfile(st.profile); const parentPhone=profile.parentPhone||profile.phone||"";
-                if(parentPhone) notifyWhatsApp(parentPhone, st.name);
-              }
-            }
-            setTimeout(()=>{if(active) scanLoopRef.current=requestAnimationFrame(tick);},1800); return;
-          }
-          scanLoopRef.current=requestAnimationFrame(tick);
-        };
-        scanLoopRef.current=requestAnimationFrame(tick);
-      }catch(e:any){ setCamError(e.message||"Camera error"); }
-    })();
-    return()=>{ active=false; if(scanLoopRef.current) cancelAnimationFrame(scanLoopRef.current); if(stream) stream.getTracks().forEach(t=>t.stop()); };
-  },[cameraActive]);
-
   const pendingCount = state.students.filter(s=>s.status==="pending").length
                      + state.teachers.filter(t=>t.status==="pending").length;
 
@@ -2094,100 +2030,42 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
         </div>
       );
 
-      case "attendance": {
-        const todayDate = new Date().toISOString().split("T")[0];
-        function adminMarkPresent(rollOrQr:string){
-          const raw=rollOrQr.trim(); if(!raw) return;
-          const roll=raw.replace(/^STUDENT:[^:]+:/,"").replace(/^STUDENT:/,"");
-          const st=state.students.filter(s=>s.status!=="pending").find(s=>s.rollNo===roll||s.rollNo===raw);
-          if(!st){ playBeep("error"); setScanFeedback({type:"error",msg:"Student not found: "+roll}); setQrVal(""); return; }
-          if(state.attendance[todayDate]?.[st.rollNo]){ playBeep("duplicate"); setScanFeedback({type:"duplicate",msg:st.name+" already marked present"}); setQrVal(""); setTimeout(()=>setScanFeedback(null),3000); return; }
-          setState(s=>({...s,attendance:{...s.attendance,[todayDate]:{...(s.attendance[todayDate]||{}),[st.rollNo]:true}}}));
-          setLastScanned(st); playBeep("success"); setScanFeedback({type:"success",msg:st.name+" marked present ✓"}); setQrVal("");
-          setTimeout(()=>{setScanFeedback(null);setLastScanned(null);},3000);
-          const profile=decProfile(st.profile); const parentPhone=profile.parentPhone||profile.phone||"";
-          if(parentPhone) notifyWhatsApp(parentPhone, st.name);
-        }
-        const allStudents=state.students.filter(s=>s.status!=="pending");
-        const presentToday=allStudents.filter(s=>state.attendance[todayDate]?.[s.rollNo]);
-        return(
-          <div className="space-y-5 max-w-2xl">
-            <div><h2 className="text-xl font-bold text-white">QR Attendance</h2><p className="text-white/30 text-xs mt-0.5">All students · Manual input · USB/Bluetooth scanner · Mobile camera</p></div>
-            <div className="bg-[#080D18] border border-white/5 rounded-2xl p-5 space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2"><Wifi size={11}/><span>USB/Bluetooth: click outside input, then scan</span></div>
-                <div className="flex items-center gap-2 text-xs text-blue-400 bg-blue-500/10 border border-blue-500/20 rounded-xl px-3 py-2"><Camera size={11}/><span>Mobile: tap "Scan with Camera" below</span></div>
+      case "attendance": return(
+        <div className="space-y-6">
+          <h2 className="text-xl font-bold text-white">QR Attendance</h2>
+          <div className="max-w-md mx-auto space-y-4">
+            <div className="bg-[#080D18] border border-white/5 rounded-2xl p-8 text-center">
+              <div className="w-20 h-20 mx-auto mb-5 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center"><QrCode size={36} className="text-blue-400"/></div>
+              <p className="text-white/40 text-sm mb-5">Enter roll number or scan QR</p>
+              <div className="flex gap-2">
+                <input value={qrIn} onChange={e=>setQrIn(e.target.value)} onKeyDown={e=>e.key==="Enter"&&scanQr()} placeholder="Roll Number" className="flex-1 bg-white/5 border border-white/10 text-white font-mono text-sm rounded-xl px-4 py-3 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+                <button onClick={scanQr} className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-xl transition-colors"><Check size={16}/></button>
               </div>
-              <div><label className="text-xs text-white/40 uppercase tracking-wider block mb-2">Roll Number / QR Code</label>
-                <div className="flex gap-2">
-                  <input value={qrVal} onChange={e=>setQrVal(e.target.value)} onKeyDown={e=>e.key==="Enter"&&adminMarkPresent(qrVal)} placeholder="Type roll number or scan…" className="flex-1 bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 font-mono placeholder-white/20"/>
-                  <button onClick={()=>adminMarkPresent(qrVal)} className="bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-2.5 rounded-xl transition-colors flex items-center gap-2"><Check size={14}/>Mark</button>
-                </div>
-              </div>
-              <button onClick={()=>setCameraActive((v:boolean)=>!v)}
-                className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl border text-sm font-medium transition-all ${cameraActive?"bg-red-500/15 border-red-500/30 text-red-400 hover:bg-red-500/25":"bg-purple-500/10 border-purple-500/30 text-purple-300 hover:bg-purple-500/20"}`}>
-                <Camera size={15}/>{cameraActive?"Stop Camera":"Scan with Camera (iOS / Android / Webcam)"}
-              </button>
-              {camError&&(
-                <div className="bg-red-500/8 border border-red-500/20 rounded-xl p-4 text-red-400 text-sm flex items-start gap-2">
-                  <AlertCircle size={15} className="flex-shrink-0 mt-0.5"/>
-                  <span>{camError}</span>
-                </div>
-              )}
-              {cameraActive&&(
-                <div className="relative rounded-2xl overflow-hidden bg-black border border-purple-500/20" style={{aspectRatio:"4/3"}}>
-                  <video ref={videoRef} className="w-full h-full object-cover" playsInline muted/>
-                  <canvas ref={canvasRef} className="hidden"/>
-                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <div className="relative w-48 h-48">
-                      <div className="absolute inset-0 border-2 border-white/20 rounded-xl"/>
-                      <div className="absolute top-0 left-0 w-8 h-8 border-t-2 border-l-2 border-purple-400 rounded-tl-xl"/>
-                      <div className="absolute top-0 right-0 w-8 h-8 border-t-2 border-r-2 border-purple-400 rounded-tr-xl"/>
-                      <div className="absolute bottom-0 left-0 w-8 h-8 border-b-2 border-l-2 border-purple-400 rounded-bl-xl"/>
-                      <div className="absolute bottom-0 right-0 w-8 h-8 border-b-2 border-r-2 border-purple-400 rounded-br-xl"/>
-                      <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-0.5 bg-purple-400/60 animate-pulse"/>
-                    </div>
-                  </div>
-                  <div className="absolute bottom-3 left-0 right-0 text-center text-xs text-white/40">Point camera at student QR code</div>
-                </div>
-              )}
-              {scanFeedback&&(
-                <div className={`flex items-center gap-3 rounded-xl px-4 py-3 border ${scanFeedback.type==="success"?"bg-emerald-500/10 border-emerald-500/30":scanFeedback.type==="duplicate"?"bg-amber-500/10 border-amber-500/30":"bg-red-500/10 border-red-500/30"}`}>
-                  {scanFeedback.type==="success"?<CheckCircle size={20} className="text-emerald-400 flex-shrink-0"/>:scanFeedback.type==="duplicate"?<AlertCircle size={20} className="text-amber-400 flex-shrink-0"/>:<XCircle size={20} className="text-red-400 flex-shrink-0"/>}
-                  <div>
-                    <div className={`text-sm font-semibold ${scanFeedback.type==="success"?"text-emerald-300":scanFeedback.type==="duplicate"?"text-amber-300":"text-red-300"}`}>{scanFeedback.type==="success"?"✓ Success":scanFeedback.type==="duplicate"?"⚠ Already Marked":"✕ Error"}</div>
-                    <div className={`text-xs mt-0.5 ${scanFeedback.type==="success"?"text-emerald-400/70":scanFeedback.type==="duplicate"?"text-amber-400/70":"text-red-400/70"}`}>{scanFeedback.msg}</div>
-                  </div>
+              {qrOk&&(
+                <div className="mt-5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 flex items-center gap-4 animate-pulse">
+                  <img src={qrOk.photo} className="w-12 h-12 rounded-full border-2 border-emerald-500/40"/>
+                  <div className="text-left"><div className="text-emerald-400 font-semibold text-sm">✓ Marked Present</div><div className="text-white text-sm">{qrOk.name}</div><div className="text-white/40 text-xs font-mono">Roll: {qrOk.rollNo}</div></div>
                 </div>
               )}
             </div>
-            <div className="bg-[#080D18] border border-white/5 rounded-2xl p-5">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-xs font-semibold text-white/50 uppercase tracking-widest">Today — {todayDate}</h3>
-                <span className="text-xs text-white/30">{presentToday.length}/{allStudents.length} Present</span>
-              </div>
-              <div className="space-y-1 max-h-72 overflow-y-auto">
-                {allStudents.length===0&&<div className="text-white/20 text-sm text-center py-8">No students</div>}
-                {allStudents.map(st=>{
-                  const present=state.attendance[todayDate]?.[st.rollNo];
-                  return(
-                    <div key={st.id} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
-                      <div className="flex items-center gap-2">
-                        <img src={st.photo} className="w-7 h-7 rounded-full border border-white/10"/>
-                        <div><div className="text-sm text-white">{st.name}</div><div className="text-xs text-white/30 font-mono">{st.rollNo}</div></div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${present?"bg-emerald-500/20 text-emerald-400":"bg-red-500/10 text-red-400"}`}>{present?"Present":"Absent"}</span>
-                        <button onClick={()=>setState(s=>({...s,attendance:{...s.attendance,[todayDate]:{...(s.attendance[todayDate]||{}),[st.rollNo]:!present}}}))} className="text-xs text-white/20 hover:text-white/50 transition-colors border border-white/10 px-2 py-0.5 rounded-full">{present?"Undo":"Mark"}</button>
-                      </div>
+            <div className="bg-[#080D18] border border-white/5 rounded-xl p-4">
+              <div className="text-xs text-white/30 uppercase tracking-wider mb-3">Today — {today}</div>
+              {state.students.map(st=>{
+                const present=state.attendance[today]?.[st.rollNo];
+                return(
+                  <div key={st.id} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
+                    <div className="flex items-center gap-2"><img src={st.photo} className="w-6 h-6 rounded-full"/><span className="text-sm text-white">{st.name}</span></div>
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2 h-2 rounded-full ${present?"bg-emerald-400":"bg-white/10"}`}/>
+                      <button onClick={()=>upd(s=>({...s,attendance:{...s.attendance,[today]:{...(s.attendance[today]||{}),[st.rollNo]:!present}}}))} className="text-xs text-white/30 hover:text-white/60 transition-colors">{present?"Undo":"Mark"}</button>
                     </div>
-                  );
-                })}
-              </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
-        );
-      }
+        </div>
+      );
 
       case "ledger":
         if(!lu) return(
@@ -2352,7 +2230,7 @@ function TeacherView({user,state,setState,onLogout,onBackToSite,db}:
       if(e.key==="Enter"){
         if(buf.val.length>2){
           const raw=buf.val.trim();
-          const roll=raw.replace(/^STUDENT:[^:]+:/,"").replace(/^STUDENT:/,"");
+          const roll=raw.startsWith("STUDENT:")?raw.split(":")[1]:raw;
           const todayDate=new Date().toISOString().split("T")[0];
           // Resolve teacher for RBAC
           const _t=state.teachers.find(t=>t.id===user.id);
@@ -2463,7 +2341,7 @@ function TeacherView({user,state,setState,onLogout,onBackToSite,db}:
 
           if(codeData){
             const raw=codeData.trim();
-            const roll=raw.replace(/^STUDENT:[^:]+:/,"").replace(/^STUDENT:/,"");
+            const roll=raw.startsWith("STUDENT:")?raw.split(":")[1]:raw;
             const todayDate=new Date().toISOString().split("T")[0];
             const _t=state.teachers.find(t=>t.id===user.id);
             const ownCls=_t ? state.classes.filter(c=>c.teacherId===_t.id) : [];
@@ -2897,7 +2775,7 @@ function TeacherView({user,state,setState,onLogout,onBackToSite,db}:
         function markPresent(rollOrQr: string){
           const raw=rollOrQr.trim();
           if(!raw) return;
-          const roll=raw.replace(/^STUDENT:[^:]+:/,"").replace(/^STUDENT:/,"");
+          const roll=raw.startsWith("STUDENT:")?raw.split(":")[1]:raw;
 
           // Find student — RBAC check
           const allApproved=state.students.filter(s=>s.status!=="pending");
