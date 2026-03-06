@@ -5,11 +5,11 @@ import {
   Plus, X, Check, Trash2, GraduationCap, Clock, Award,
   Search, Bell, ChevronRight, Save, Shield,
   LogOut, Eye, EyeOff, User, Lock, Home,
-  CheckCircle, AlertCircle, TrendingUp, Grid3X3, Download, FileText,
+  CheckCircle, AlertCircle, XCircle, TrendingUp, Grid3X3, Download, FileText,
   Upload, UserPlus, Phone, Printer,
   Globe, Image, Newspaper, Star, Users2, MapPin, Calendar, Tag, Edit2, ExternalLink, ChevronLeft, ChevronDown, PlayCircle,
   HeartHandshake, DollarSign, Package, KeyRound, CreditCard, Boxes, ClipboardList, AlertTriangle, Database, Wifi, WifiOff,
-  Menu, ClipboardCheck, Camera
+  Menu, ClipboardCheck, Camera, LayoutDashboard, FolderOpen, Layers
 } from "lucide-react";
 
 // ─── Supabase Client ──────────────────────────────────────────────────────────
@@ -27,6 +27,8 @@ import {
 // -- Add photo column to existing teachers and students tables:
 // alter table teachers add column if not exists photo text;
 // alter table students add column if not exists photo text;
+// -- Add assigned_teacher_id to labs:
+// alter table labs add column if not exists assigned_teacher_id text;
 //
 // -- Allow all for anon (same as your other tables):
 // alter table app_config enable row level security;
@@ -189,7 +191,8 @@ interface GalleryItem  { id:string; imageUrl:string; caption:string; category:st
 interface NewsPost     { id:string; title:string; body:string; imageUrl:string; category:"news"|"blog"|"circular"; date:string; author:string; pinned?:boolean; }
 interface Achievement  { id:string; title:string; description:string; imageUrl:string; category:"academic"|"sports"|"aesthetic"; year:string; }
 interface Club         { id:string; name:string; description:string; imageUrl:string; teacher:string; members:number; badge:string; }
-interface MediaFile    { id:string; name:string; url:string; type:"image"|"pdf"; size:string; uploadedAt:string; }
+interface MediaFile    { id:string; name:string; url:string; type:"image"|"pdf"; size:string; uploadedAt:string; category?:string; classId?:string; subjectId?:string; className?:string; subjectName?:string; }
+interface DownloadCategory { id:string; name:string; icon:string; }
 interface PrincipalMsg { text:string; name:string; title:string; photo:string; }
 interface VisionMission{ vision:string; mission:string; history:string; contact:string; address:string; mapEmbed:string; }
 
@@ -203,6 +206,7 @@ interface CMS {
   achievements:Achievement[];
   clubs:Club[];
   media:MediaFile[];
+  downloadCategories:DownloadCategory[];
   principal:PrincipalMsg;
   visionMission:VisionMission;
   quickStats:{students:number;teachers:number;founded:number;achievements:number;};
@@ -231,6 +235,8 @@ interface AppState {
   fees:FeesState;
   inventory:InventoryState;
   behavior:BehaviorState;
+  exams:Exam[];
+  examRecords:ExamRecord[];
 }
 
 // ─── Counseling Module Types ───────────────────────────────────────────────────
@@ -239,6 +245,10 @@ interface CounselingProfile { studentId:string; background:string; sessions:Coun
 interface CounselingState   { profiles:CounselingProfile[]; }
 
 // ─── Fees Module Types ─────────────────────────────────────────────────────────
+// ─── Exam System Types ─────────────────────────────────────────────────────────
+interface Exam { id:string; year:number; name:string; createdAt:string; }
+interface ExamRecord { id:string; examId:string; studentId:string; subjectId:string; marks:number; }
+
 type FeeCategory = "tuition"|"transport"|"lab"|"sports"|"activity"|"other";
 interface FeeRecord { id:string; studentId:string; category:FeeCategory; label:string; amount:number; dueDate:string; paidDate?:string; status:"paid"|"unpaid"|"partial"; paidAmount?:number; note?:string; }
 interface FeesState { records:FeeRecord[]; }
@@ -246,7 +256,7 @@ interface FeesState { records:FeeRecord[]; }
 // ─── Inventory Module Types ────────────────────────────────────────────────────
 type ItemCondition = "excellent"|"good"|"fair"|"poor"|"damaged";
 interface InventoryItem { id:string; name:string; category:string; quantity:number; unit:string; condition:ItemCondition; location:string; lastChecked:string; note?:string; labId?:string; }
-interface Lab { id:string; name:string; icon:string; password:string; description:string; color:string; }
+interface Lab { id:string; name:string; icon:string; password:string; description:string; color:string; assignedTeacherId?:string; }
 interface InventoryState { items:InventoryItem[]; labs:Lab[]; }
 interface LoggedInUser { role:Role; id:string; name:string }
 
@@ -368,6 +378,13 @@ const INITIAL: AppState = {
       {id:"i8",name:"Physics Oscilloscopes",category:"Lab Equipment",quantity:8,unit:"pcs", condition:"good",      location:"Physics Lab",      lastChecked:"2026-02-10", labId:"lab1"},
     ]
   },
+  exams: [
+    {id:"ex1", year:2025, name:"1st Term Test",  createdAt:"2025-04-01"},
+    {id:"ex2", year:2025, name:"2nd Term Test",  createdAt:"2025-08-01"},
+    {id:"ex3", year:2025, name:"Annual Exam",    createdAt:"2025-11-01"},
+    {id:"ex4", year:2026, name:"1st Term Test",  createdAt:"2026-04-01"},
+  ],
+  examRecords: [],
   behavior: {
     records: [
       {id:"bh1",studentId:"st1",date:"2026-02-05",type:"positive",severity:"commendation",category:"Academic",description:"Scored highest in the class in the Mathematics mock exam.",actionTaken:"Certificate of Excellence awarded",status:"resolved",reportedBy:"Admin"},
@@ -406,6 +423,15 @@ const INITIAL: AppState = {
       {id:"cl4",name:"Eco Green Club",description:"Dedicated to environmental conservation. Tree planting, waste reduction campaigns, and awareness programs.",imageUrl:"https://images.unsplash.com/photo-1466611653911-95081537e5b7?w=600&q=80",teacher:"Ms. Priya Sharma",members:56,badge:"🌿"},
     ],
     media: [],
+    downloadCategories: [
+      {id:"dc1", name:"Past Papers",  icon:"📄"},
+      {id:"dc2", name:"Circulars",    icon:"📢"},
+      {id:"dc3", name:"Forms",        icon:"📋"},
+      {id:"dc4", name:"Lessons",      icon:"📚"},
+      {id:"dc5", name:"Homework",     icon:"✏️"},
+      {id:"dc6", name:"Letters",      icon:"✉️"},
+      {id:"dc7", name:"Images",       icon:"🖼️"},
+    ],
     principal: {
       text:"At Nexus Academy, we believe that every child is a unique constellation of talents waiting to be discovered. Our mission is not merely to educate but to inspire — to ignite the flame of curiosity, nurture resilience, and build the character that will carry our students through life's greatest challenges. We are proud of our legacy and even more excited about our future.",
       name:"Dr. Kavindra Perera",
@@ -439,6 +465,50 @@ const INITIAL: AppState = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const uid   = () => Math.random().toString(36).slice(2, 9);
+
+// ─── Audio Beep Utility ───────────────────────────────────────────────────────
+function playBeep(type:"success"|"error"|"duplicate"){
+  try{
+    const ctx=new (window.AudioContext||(window as any).webkitAudioContext)();
+    const o=ctx.createOscillator();
+    const g=ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    if(type==="success"){
+      // Two-tone ascending beep
+      o.frequency.setValueAtTime(880,ctx.currentTime);
+      o.frequency.setValueAtTime(1100,ctx.currentTime+0.12);
+      g.gain.setValueAtTime(0.4,ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.35);
+      o.start(ctx.currentTime); o.stop(ctx.currentTime+0.35);
+    } else if(type==="error"){
+      // Low descending buzz
+      o.frequency.setValueAtTime(300,ctx.currentTime);
+      o.frequency.setValueAtTime(150,ctx.currentTime+0.15);
+      g.gain.setValueAtTime(0.5,ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.4);
+      o.type="sawtooth";
+      o.start(ctx.currentTime); o.stop(ctx.currentTime+0.4);
+    } else {
+      // Duplicate — single mid tone
+      o.frequency.setValueAtTime(600,ctx.currentTime);
+      g.gain.setValueAtTime(0.3,ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.25);
+      o.start(ctx.currentTime); o.stop(ctx.currentTime+0.25);
+    }
+  } catch{ /* AudioContext blocked (autoplay policy) — silently ignore */ }
+}
+
+// ─── WhatsApp Notify (fire-and-forget) ───────────────────────────────────────
+async function notifyWhatsApp(phone:string, studentName:string){
+  if(!phone) return;
+  try{
+    await fetch("/api/whatsapp-notify",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({phone, studentName, time: new Date().toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit"})}),
+    });
+  } catch{ /* WhatsApp server not running — silently skip */ }
+}
 const today = new Date().toISOString().split("T")[0];
 
 
@@ -658,7 +728,7 @@ function StudentProfileModal({student,state,onSave,onClose}:{student:Student;sta
       </div>
       {showIDCard&&(
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4" onClick={e=>e.target===e.currentTarget&&setShowIDCard(false)}>
-          <StudentIDCard student={{...student,photo:photo||student.photo}} cls={cls} schoolName={state.settings.name} schoolTagline={state.settings.tagline} onClose={()=>setShowIDCard(false)}/>
+          <StudentIDCard student={{...student,photo:photo||student.photo}} cls={cls} schoolName={state.settings.name} schoolTagline={state.settings.tagline} logoUrl={state.settings.logoUrl} onClose={()=>setShowIDCard(false)}/>
         </div>
       )}
     </div>
@@ -666,7 +736,7 @@ function StudentProfileModal({student,state,onSave,onClose}:{student:Student;sta
 }
 
 // ─── Student ID Card ─────────────────────────────────────────────────────────
-function StudentIDCard({student,cls,schoolName,schoolTagline,onClose}:{student:Student;cls?:{name:string;section:string};schoolName:string;schoolTagline:string;onClose:()=>void}){
+function StudentIDCard({student,cls,schoolName,schoolTagline,logoUrl,onClose}:{student:Student;cls?:{name:string;section:string};schoolName:string;schoolTagline:string;logoUrl?:string;onClose:()=>void}){
   const cardRef = React.useRef<HTMLDivElement>(null);
   const qrData  = encodeURIComponent(`STUDENT:${student.rollNo}:${student.name}`);
   const qrUrl   = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${qrData}&bgcolor=0d1117&color=60a5fa&margin=8`;
@@ -705,7 +775,7 @@ function StudentIDCard({student,cls,schoolName,schoolTagline,onClose}:{student:S
     </style></head><body>
     <div class="card">
       <div class="top">
-        <div style="width:36px;height:36px;background:rgba(255,255,255,0.15);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">🏫</div>
+        ${logoUrl?`<img src="${logoUrl}" style="width:36px;height:36px;border-radius:8px;object-fit:cover;flex-shrink:0"/>`:`<div style="width:36px;height:36px;background:rgba(255,255,255,0.15);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">🏫</div>`}
         <div><div class="school-name">${schoolName}</div><div class="school-tag">${schoolTagline}</div></div>
       </div>
       <div class="body">
@@ -743,7 +813,7 @@ function StudentIDCard({student,cls,schoolName,schoolTagline,onClose}:{student:S
       <div ref={cardRef} style={{width:360,background:"linear-gradient(135deg,#0f1729 0%,#111827 50%,#0d1b2a 100%)",border:"1px solid rgba(59,130,246,0.3)",borderRadius:16,overflow:"hidden",fontFamily:"system-ui,sans-serif"}}>
         {/* Header */}
         <div style={{background:"linear-gradient(135deg,#1e3a5f,#1e40af)",padding:"14px 16px",display:"flex",alignItems:"center",gap:12}}>
-          <div style={{width:36,height:36,background:"rgba(255,255,255,0.15)",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>🏫</div>
+          {logoUrl?<img src={logoUrl} style={{width:36,height:36,borderRadius:8,objectFit:"cover",flexShrink:0}}/>:<div style={{width:36,height:36,background:"rgba(255,255,255,0.15)",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>🏫</div>}
           <div><div style={{fontSize:14,fontWeight:700,color:"#fff"}}>{schoolName}</div><div style={{fontSize:10,color:"rgba(255,255,255,0.6)",marginTop:2}}>{schoolTagline}</div></div>
         </div>
         {/* Body */}
@@ -948,6 +1018,47 @@ function SubjectChart({state,classId}:{state:AppState;classId:string}) {
   );
 }
 
+// ─── Ledger with Exam Selector ─────────────────────────────────────────────────
+function LedgerWithExams({state,classId,onClassChange}:{state:AppState;classId:string;onClassChange:(id:string)=>void}){
+  const [mode,setMode]=React.useState<"current"|"exam">("current");
+  const [selExam,setSelExam]=React.useState<string>("");
+  const years=[...new Set(state.exams.map(e=>e.year))].sort((a,b)=>b-a);
+  const examStudents=React.useMemo(()=>{
+    if(!selExam||mode!=="exam") return null;
+    const recs=state.examRecords.filter(r=>r.examId===selExam&&state.students.some(s=>s.id===r.studentId&&s.classId===classId));
+    return state.students.filter(s=>s.classId===classId).map(st=>{
+      const marks:Record<string,number>={};
+      recs.filter(r=>r.studentId===st.id).forEach(r=>{marks[r.subjectId]=r.marks;});
+      return {...st,marks};
+    });
+  },[selExam,classId,state.examRecords,state.students,mode]);
+  const examInfo=selExam?state.exams.find(e=>e.id===selExam):null;
+  return(
+    <div className="space-y-4">
+      <div className="flex gap-2 p-1 bg-white/5 rounded-xl w-fit">
+        <button onClick={()=>setMode("current")} className={`text-xs px-4 py-2 rounded-lg font-medium transition-all ${mode==="current"?"bg-blue-600 text-white":"text-white/40 hover:text-white/70"}`}>Current Marks</button>
+        <button onClick={()=>setMode("exam")} className={`text-xs px-4 py-2 rounded-lg font-medium transition-all ${mode==="exam"?"bg-blue-600 text-white":"text-white/40 hover:text-white/70"}`}>Exam Records</button>
+      </div>
+      {mode==="exam"&&(
+        <div className="flex gap-3 flex-wrap items-center">
+          <select value={selExam} onChange={e=>setSelExam(e.target.value)} className="bg-[#080D18] border border-white/10 text-white text-sm rounded-xl px-3 py-2.5 outline-none">
+            <option value="">— Select Exam —</option>
+            {years.map(y=>(
+              <optgroup key={y} label={String(y)}>
+                {state.exams.filter(e=>e.year===y).map(ex=><option key={ex.id} value={ex.id}>{ex.name} ({ex.year})</option>)}
+              </optgroup>
+            ))}
+          </select>
+          {examInfo&&<span className="text-xs text-blue-300 bg-blue-500/10 border border-blue-500/20 px-3 py-1.5 rounded-full">{examInfo.name} · {examInfo.year}</span>}
+        </div>
+      )}
+      {mode==="current"&&<MarksheetView state={state} classId={classId} onClassChange={onClassChange} availableClasses={state.classes}/>}
+      {mode==="exam"&&selExam&&examStudents&&<MarksheetView state={{...state,students:examStudents}} classId={classId} onClassChange={onClassChange} availableClasses={state.classes}/>}
+      {mode==="exam"&&!selExam&&<div className="bg-[#080D18] border border-white/5 rounded-2xl p-12 text-center text-white/30 text-sm">Select an exam to view historical results</div>}
+    </div>
+  );
+}
+
 // ─── Shared Marksheet (Admin + Class Teacher) ─────────────────────────────────
 function MarksheetView({state,classId,onClassChange,availableClasses}:
   {state:AppState;classId:string;onClassChange:(id:string)=>void;availableClasses:Class[]}) {
@@ -1133,8 +1244,8 @@ function LoginScreen({state,db,onLogin,onRegister,onBack}:{state:AppState;db:DbO
 // ═══════════════════════════════════════════════════════════════════════════════
 // LAYOUT
 // ═══════════════════════════════════════════════════════════════════════════════
-function Layout({user,state,children,navItems,activeTab,setTab,onLogout}:
-  {user:LoggedInUser;state:AppState;children:React.ReactNode;navItems:{id:string;label:string;icon:any;badge?:number}[];activeTab:string;setTab:(t:string)=>void;onLogout:()=>void}) {
+function Layout({user,state,children,navItems,activeTab,setTab,onLogout,onBackToSite}:
+  {user:LoggedInUser;state:AppState;children:React.ReactNode;navItems:{id:string;label:string;icon:any;badge?:number}[];activeTab:string;setTab:(t:string)=>void;onLogout:()=>void;onBackToSite?:()=>void}) {
 
   // Desktop: collapsed (icon-only) vs expanded
   const [open,setOpen]         = useState(true);
@@ -1218,6 +1329,10 @@ function Layout({user,state,children,navItems,activeTab,setTab,onLogout}:
 
         {/* Footer: sign out + desktop collapse toggle */}
         <div className="p-2 border-t border-white/5 space-y-1">
+          {onBackToSite&&<button onClick={onBackToSite} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-white/30 hover:text-[#C9A84C] hover:bg-[#C9A84C]/10 transition-all">
+            <Globe size={14} className="flex-shrink-0"/>
+            {showLabels&&<span className="text-xs">Back to Website</span>}
+          </button>}
           <button onClick={onLogout} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-white/30 hover:text-red-400 hover:bg-red-500/10 transition-all">
             <LogOut size={14} className="flex-shrink-0"/>
             {showLabels&&<span className="text-xs">Sign Out</span>}
@@ -1305,8 +1420,8 @@ function Layout({user,state,children,navItems,activeTab,setTab,onLogout}:
 // ═══════════════════════════════════════════════════════════════════════════════
 // ADMIN VIEW
 // ═══════════════════════════════════════════════════════════════════════════════
-function AdminView({user,state,setState,onLogout,isSA,db}:
-  {user:LoggedInUser;state:AppState;setState:(fn:(s:AppState)=>AppState)=>void;onLogout:()=>void;isSA?:boolean;db:DbOps}) {
+function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
+  {user:LoggedInUser;state:AppState;setState:(fn:(s:AppState)=>AppState)=>void;onLogout:()=>void;onBackToSite?:()=>void;isSA?:boolean;db:DbOps}) {
 
   const [tab,setTab]           = useState("dashboard");
   const [popup,setPopup]       = useState<{type:string;data?:any}|null>(null);
@@ -1325,6 +1440,70 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
   const [editTch,setEditTch]   = useState<Teacher|null>(null);
   const upd = setState;
 
+  // QR Attendance state for AdminView
+  const [qrVal,setQrVal]                 = useState("");
+  const [cameraActive,setCameraActive]   = useState(false);
+  const [scanFeedback,setScanFeedback]   = useState<{type:"success"|"error"|"duplicate";msg:string}|null>(null);
+  const [camError,setCamError]           = useState("");
+  const [lastScanned,setLastScanned]     = useState<Student|null>(null);
+  const [attMode,setAttMode]             = useState<"today"|"history">("today");
+  const videoRef  = React.useRef<HTMLVideoElement>(null);
+  const canvasRef = React.useRef<HTMLCanvasElement>(null);
+  const scanLoopRef = React.useRef<number|null>(null);
+
+  // Stop camera when leaving attendance tab
+  React.useEffect(()=>{ if(tab!=="attendance"){ setCameraActive(false); } },[tab]);
+
+  // Camera lifecycle
+  React.useEffect(()=>{
+    let stream:MediaStream|null=null;
+    let active=true;
+    if(!cameraActive){ if(scanLoopRef.current) cancelAnimationFrame(scanLoopRef.current); return; }
+    (async()=>{
+      try{
+        stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
+        if(!active){stream.getTracks().forEach(t=>t.stop());return;}
+        if(videoRef.current){ videoRef.current.srcObject=stream; await videoRef.current.play(); }
+        setCamError("");
+        let detector:any=null;
+        try{ if((window as any).BarcodeDetector) detector=new (window as any).BarcodeDetector({formats:["qr_code"]}); }catch{}
+        if(!detector&&!(window as any).jsQR){
+          const srcs=["https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js","https://unpkg.com/jsqr@1.4.0/dist/jsQR.js"];
+          for(const src of srcs){ try{ await new Promise<void>((res,rej)=>{const s=document.createElement("script");s.src=src;s.onload=()=>res();s.onerror=()=>rej();document.head.appendChild(s);}); if((window as any).jsQR) break; }catch{} }
+        }
+        const tick=async()=>{
+          if(!active) return;
+          const v=videoRef.current; const cv=canvasRef.current;
+          if(!v||!cv){scanLoopRef.current=requestAnimationFrame(tick);return;}
+          if(v.readyState!==v.HAVE_ENOUGH_DATA){scanLoopRef.current=requestAnimationFrame(tick);return;}
+          cv.width=v.videoWidth; cv.height=v.videoHeight;
+          const ctx=cv.getContext("2d"); if(!ctx){scanLoopRef.current=requestAnimationFrame(tick);return;}
+          ctx.drawImage(v,0,0,cv.width,cv.height);
+          let decoded:string|null=null;
+          if(detector){ try{ const r=await detector.detect(cv); if(r.length>0) decoded=r[0].rawValue; }catch{} }
+          else if((window as any).jsQR){ const imgData=ctx.getImageData(0,0,cv.width,cv.height); const code=(window as any).jsQR(imgData.data,imgData.width,imgData.height,{inversionAttempts:"dontInvert"}); if(code) decoded=code.data; }
+          if(decoded){
+            const roll=decoded.trim().replace(/^STUDENT:[^:]+:/,"").replace(/^STUDENT:/,"");
+            const st=state.students.filter(s=>s.status!=="pending").find(s=>s.rollNo===roll||s.rollNo===decoded);
+            if(st){
+              if(state.attendance[new Date().toISOString().split("T")[0]]?.[st.rollNo]){ playBeep("duplicate"); setScanFeedback({type:"duplicate",msg:st.name+" already marked present"}); setTimeout(()=>setScanFeedback(null),3000); }
+              else{
+                setState(s=>({...s,attendance:{...s.attendance,[new Date().toISOString().split("T")[0]]:{...(s.attendance[new Date().toISOString().split("T")[0]]||{}),[st.rollNo]:true}}}));
+                setLastScanned(st); playBeep("success"); setScanFeedback({type:"success",msg:st.name+" marked present ✓"}); setTimeout(()=>{setScanFeedback(null);setLastScanned(null);},3000);
+                const profile=decProfile(st.profile); const parentPhone=profile.parentPhone||profile.phone||"";
+                if(parentPhone) notifyWhatsApp(parentPhone, st.name);
+              }
+            }
+            setTimeout(()=>{if(active) scanLoopRef.current=requestAnimationFrame(tick);},1800); return;
+          }
+          scanLoopRef.current=requestAnimationFrame(tick);
+        };
+        scanLoopRef.current=requestAnimationFrame(tick);
+      }catch(e:any){ setCamError(e.message||"Camera error"); }
+    })();
+    return()=>{ active=false; if(scanLoopRef.current) cancelAnimationFrame(scanLoopRef.current); if(stream) stream.getTracks().forEach(t=>t.stop()); };
+  },[cameraActive]);
+
   const pendingCount = state.students.filter(s=>s.status==="pending").length
                      + state.teachers.filter(t=>t.status==="pending").length;
 
@@ -1336,6 +1515,7 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
     {id:"teachers",         label:"Teachers",         icon:GraduationCap},
     {id:"students",         label:"Students",         icon:Users},
     {id:"marks",            label:"Marks Entry",      icon:Award},
+    {id:"exams",            label:"Exams",             icon:FileText},
     {id:"timetable",        label:"Timetable",        icon:Clock},
     {id:"attendance",       label:"QR Attendance",    icon:QrCode},
     {id:"ledger",           label:"Result Ledger",    icon:BarChart3},
@@ -1604,8 +1784,8 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
                         <button onClick={()=>setPopup({type:"editClass",data:cls})} className="text-white/20 hover:text-blue-400 transition-colors" title="Edit Class Teacher"><Edit2 size={14}/></button>
                         <button onClick={async()=>{
                           if(!confirm(`Delete class ${cls.name}-${cls.section}? Students will be unassigned but NOT deleted.`)) return;
-                          upd(s=>({...s,classes:s.classes.filter(c=>c.id!==cls.id)}));
-                          try{await sb.delete("classes",cls.id);}catch(e){console.warn("[sb.classes delete]",e);}
+                          upd(s=>({...s,classes:s.classes.filter(c=>c.id!==cls.id),students:s.students.map(st=>st.classId===cls.id?{...st,classId:""}:st)}));
+                          try{await sb.delete("classes",cls.id);const aff=state.students.filter(st=>st.classId===cls.id);await Promise.all(aff.map(st=>sb.update("students",st.id,{class_id:null}).catch(()=>{})));}catch(e){console.warn("[sb.classes delete]",e);}
                         }} className="text-white/20 hover:text-red-400 transition-colors" title="Delete class (students preserved)"><Trash2 size={14}/></button>
                       </div>
                     )}
@@ -1713,6 +1893,85 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
               <button onClick={()=>setPopup({type:"addStudent"})} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-2 rounded-lg transition-colors"><Plus size={14}/>Add Student</button>
             </div>
           </div>
+          {/* Bulk ID Card Download by Class */}
+          <div className="bg-[#080D18] border border-white/5 rounded-xl px-4 py-3 flex flex-wrap items-center gap-3">
+            <CreditCard size={14} className="text-[#C9A84C] flex-shrink-0"/>
+            <span className="text-white/60 text-sm flex-shrink-0">Bulk ID Cards:</span>
+            <select id="bulkIdClassSel" className="bg-[#05080F] border border-white/10 text-white text-sm rounded-lg px-3 py-1.5 outline-none focus:border-blue-500/50 flex-1 min-w-[140px]">
+              <option value="all">All Classes</option>
+              {state.classes.map(c=><option key={c.id} value={c.id}>Class {c.name}-{c.section}</option>)}
+            </select>
+            <button onClick={()=>{
+              const sel=(document.getElementById("bulkIdClassSel") as HTMLSelectElement)?.value||"all";
+              const target=state.students.filter(st=>st.status!=="pending"&&(sel==="all"||st.classId===sel));
+              if(!target.length){alert("No students found for selected class.");return;}
+              const schoolName=state.settings.name;
+              const schoolTagline=state.settings.tagline;
+              const logoUrl=state.settings.logoUrl||"";
+              const cardsHtml=target.map(st=>{
+                const cls=state.classes.find(c=>c.id===st.classId);
+                const d=decProfile(st.profile);
+                const qrData=encodeURIComponent("STUDENT:"+st.rollNo+":"+st.name);
+                const qrUrl="https://api.qrserver.com/v1/create-qr-code/?size=120x120&data="+qrData+"&bgcolor=0d1117&color=60a5fa&margin=8";
+                const logoHtml=logoUrl?`<img src="${logoUrl}" style="width:36px;height:36px;border-radius:8px;object-fit:cover;flex-shrink:0"/>`:`<div style="width:36px;height:36px;background:rgba(255,255,255,0.15);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">🏫</div>`;
+                return `<div class="card">
+                  <div class="top">${logoHtml}<div><div class="school-name">${schoolName}</div><div class="school-tag">${schoolTagline}</div></div></div>
+                  <div class="body">
+                    <img src="${st.photo}" class="photo"/>
+                    <div class="info">
+                      <div class="name">${st.name}</div>
+                      <div class="roll">Roll No: ${st.rollNo}</div>
+                      <div class="row">Class <span>${cls?cls.name+"-"+cls.section:"—"}</span></div>
+                      <div class="row">Blood Group <span>${d.bloodGroup||"—"}</span></div>
+                      <div class="row">Academic Year <span>2026</span></div>
+                    </div>
+                  </div>
+                  ${(d.parentName||d.phone||d.address)?`<hr class="divider"/><div class="contact">
+                    ${d.parentName?`<div class="contact-row">👤 Custodian &nbsp;<span>${d.parentName}</span></div>`:""}
+                    ${d.phone?`<div class="contact-row">📞 Phone &nbsp;<span>${d.phone}</span></div>`:""}
+                    ${d.address?`<div class="contact-row">📍 Address &nbsp;<span>${d.address}</span></div>`:""}
+                  </div>`:""}
+                  <div class="bottom">
+                    <div class="badge"><div class="label">Student ID</div><div class="val">${st.rollNo}</div></div>
+                    <img src="${qrUrl}" width="78" height="78" style="border-radius:8px"/>
+                  </div>
+                </div>`;
+              }).join("<div class='pagebreak'></div>");
+              const html=`<!DOCTYPE html><html><head><style>
+                *{margin:0;padding:0;box-sizing:border-box}
+                body{background:#f3f4f6;font-family:'Segoe UI',sans-serif;padding:16px}
+                .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:16px}
+                .card{width:360px;background:linear-gradient(135deg,#0f1729 0%,#111827 50%,#0d1b2a 100%);border:1px solid rgba(59,130,246,0.3);border-radius:16px;overflow:hidden;color:white}
+                .top{background:linear-gradient(135deg,#1e3a5f,#1e40af);padding:14px 16px;display:flex;align-items:center;gap:12px}
+                .top .school-name{font-size:14px;font-weight:700;color:white}
+                .top .school-tag{font-size:10px;color:rgba(255,255,255,0.6);margin-top:2px}
+                .body{padding:16px;display:flex;gap:14px;align-items:flex-start}
+                .photo{width:82px;height:90px;border-radius:10px;border:2px solid rgba(59,130,246,0.5);flex-shrink:0;object-fit:cover}
+                .info{flex:1}
+                .name{font-size:15px;font-weight:700;color:white;margin-bottom:2px}
+                .roll{font-size:11px;color:#60a5fa;font-family:monospace;margin-bottom:7px}
+                .row{display:flex;justify-content:space-between;font-size:10.5px;color:rgba(255,255,255,0.45);margin-bottom:3px}
+                .row span{color:rgba(255,255,255,0.88);font-weight:500}
+                .divider{border:none;border-top:1px solid rgba(255,255,255,0.07);margin:10px 16px}
+                .contact{padding:0 16px 10px}
+                .contact-row{display:flex;gap:6px;font-size:10px;color:rgba(255,255,255,0.45);margin-bottom:4px;align-items:flex-start}
+                .contact-row span{color:rgba(255,255,255,0.8);font-weight:500}
+                .bottom{padding:10px 16px;display:flex;align-items:center;justify-content:space-between;border-top:1px solid rgba(255,255,255,0.08)}
+                .badge{background:rgba(59,130,246,0.12);border:1px solid rgba(59,130,246,0.3);border-radius:8px;padding:6px 14px;text-align:center}
+                .badge .label{font-size:9px;color:#60a5fa;text-transform:uppercase;letter-spacing:1px}
+                .badge .val{font-size:15px;font-weight:700;color:white;margin-top:2px;font-family:monospace}
+                .pagebreak{page-break-after:always}
+                @media print{body{background:white;padding:8px}.grid{grid-template-columns:repeat(2,360px);gap:12px}@page{size:A4;margin:10mm}}
+              </style></head><body><div class="grid">${cardsHtml}</div></body></html>`;
+              const w=window.open("","_blank","width=900,height=700");
+              if(!w)return;
+              w.document.write(html);
+              w.document.close();
+              w.onload=()=>{w.print();};
+            }} className="flex items-center gap-2 bg-[#C9A84C] hover:bg-[#b8963f] text-[#0f1729] font-bold text-xs px-4 py-2 rounded-lg transition-colors flex-shrink-0">
+              <Download size={12}/>Download All ID Cards
+            </button>
+          </div>
           {csvMsg&&<div className="flex items-center gap-2 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-2.5"><CheckCircle size={12}/><span className="flex-1">{csvMsg}</span><button onClick={()=>setCsvMsg("")} className="text-white/30 hover:text-white/60"><X size={11}/></button></div>}
           <div className="text-[10px] text-white/30 bg-white/3 border border-white/5 rounded-lg px-3 py-2">CSV columns: <span className="font-mono text-white/50">name, rollno, class, section, password, dob, gender, phone, address, parent_name, parent_phone, blood_group</span></div>
           <div className="bg-[#080D18] border border-white/5 rounded-xl overflow-hidden overflow-x-auto">
@@ -1785,6 +2044,8 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
         </div>
       );
 
+      case "exams": return <ExamsManager state={state} setState={upd}/>;
+
       case "timetable": return(
         <div className="space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-3">
@@ -1833,42 +2094,100 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
         </div>
       );
 
-      case "attendance": return(
-        <div className="space-y-6">
-          <h2 className="text-xl font-bold text-white">QR Attendance</h2>
-          <div className="max-w-md mx-auto space-y-4">
-            <div className="bg-[#080D18] border border-white/5 rounded-2xl p-8 text-center">
-              <div className="w-20 h-20 mx-auto mb-5 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center"><QrCode size={36} className="text-blue-400"/></div>
-              <p className="text-white/40 text-sm mb-5">Enter roll number or scan QR</p>
-              <div className="flex gap-2">
-                <input value={qrIn} onChange={e=>setQrIn(e.target.value)} onKeyDown={e=>e.key==="Enter"&&scanQr()} placeholder="Roll Number" className="flex-1 bg-white/5 border border-white/10 text-white font-mono text-sm rounded-xl px-4 py-3 outline-none focus:border-blue-500/50 placeholder-white/20"/>
-                <button onClick={scanQr} className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-xl transition-colors"><Check size={16}/></button>
+      case "attendance": {
+        const todayDate = new Date().toISOString().split("T")[0];
+        function adminMarkPresent(rollOrQr:string){
+          const raw=rollOrQr.trim(); if(!raw) return;
+          const roll=raw.replace(/^STUDENT:[^:]+:/,"").replace(/^STUDENT:/,"");
+          const st=state.students.filter(s=>s.status!=="pending").find(s=>s.rollNo===roll||s.rollNo===raw);
+          if(!st){ playBeep("error"); setScanFeedback({type:"error",msg:"Student not found: "+roll}); setQrVal(""); return; }
+          if(state.attendance[todayDate]?.[st.rollNo]){ playBeep("duplicate"); setScanFeedback({type:"duplicate",msg:st.name+" already marked present"}); setQrVal(""); setTimeout(()=>setScanFeedback(null),3000); return; }
+          setState(s=>({...s,attendance:{...s.attendance,[todayDate]:{...(s.attendance[todayDate]||{}),[st.rollNo]:true}}}));
+          setLastScanned(st); playBeep("success"); setScanFeedback({type:"success",msg:st.name+" marked present ✓"}); setQrVal("");
+          setTimeout(()=>{setScanFeedback(null);setLastScanned(null);},3000);
+          const profile=decProfile(st.profile); const parentPhone=profile.parentPhone||profile.phone||"";
+          if(parentPhone) notifyWhatsApp(parentPhone, st.name);
+        }
+        const allStudents=state.students.filter(s=>s.status!=="pending");
+        const presentToday=allStudents.filter(s=>state.attendance[todayDate]?.[s.rollNo]);
+        return(
+          <div className="space-y-5 max-w-2xl">
+            <div><h2 className="text-xl font-bold text-white">QR Attendance</h2><p className="text-white/30 text-xs mt-0.5">All students · Manual input · USB/Bluetooth scanner · Mobile camera</p></div>
+            <div className="bg-[#080D18] border border-white/5 rounded-2xl p-5 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2"><Wifi size={11}/><span>USB/Bluetooth: click outside input, then scan</span></div>
+                <div className="flex items-center gap-2 text-xs text-blue-400 bg-blue-500/10 border border-blue-500/20 rounded-xl px-3 py-2"><Camera size={11}/><span>Mobile: tap "Scan with Camera" below</span></div>
               </div>
-              {qrOk&&(
-                <div className="mt-5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 flex items-center gap-4 animate-pulse">
-                  <img src={qrOk.photo} className="w-12 h-12 rounded-full border-2 border-emerald-500/40"/>
-                  <div className="text-left"><div className="text-emerald-400 font-semibold text-sm">✓ Marked Present</div><div className="text-white text-sm">{qrOk.name}</div><div className="text-white/40 text-xs font-mono">Roll: {qrOk.rollNo}</div></div>
+              <div><label className="text-xs text-white/40 uppercase tracking-wider block mb-2">Roll Number / QR Code</label>
+                <div className="flex gap-2">
+                  <input value={qrVal} onChange={e=>setQrVal(e.target.value)} onKeyDown={e=>e.key==="Enter"&&adminMarkPresent(qrVal)} placeholder="Type roll number or scan…" className="flex-1 bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 font-mono placeholder-white/20"/>
+                  <button onClick={()=>adminMarkPresent(qrVal)} className="bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-2.5 rounded-xl transition-colors flex items-center gap-2"><Check size={14}/>Mark</button>
+                </div>
+              </div>
+              <button onClick={()=>setCameraActive((v:boolean)=>!v)}
+                className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl border text-sm font-medium transition-all ${cameraActive?"bg-red-500/15 border-red-500/30 text-red-400 hover:bg-red-500/25":"bg-purple-500/10 border-purple-500/30 text-purple-300 hover:bg-purple-500/20"}`}>
+                <Camera size={15}/>{cameraActive?"Stop Camera":"Scan with Camera (iOS / Android / Webcam)"}
+              </button>
+              {camError&&(
+                <div className="bg-red-500/8 border border-red-500/20 rounded-xl p-4 text-red-400 text-sm flex items-start gap-2">
+                  <AlertCircle size={15} className="flex-shrink-0 mt-0.5"/>
+                  <span>{camError}</span>
+                </div>
+              )}
+              {cameraActive&&(
+                <div className="relative rounded-2xl overflow-hidden bg-black border border-purple-500/20" style={{aspectRatio:"4/3"}}>
+                  <video ref={videoRef} className="w-full h-full object-cover" playsInline muted/>
+                  <canvas ref={canvasRef} className="hidden"/>
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div className="relative w-48 h-48">
+                      <div className="absolute inset-0 border-2 border-white/20 rounded-xl"/>
+                      <div className="absolute top-0 left-0 w-8 h-8 border-t-2 border-l-2 border-purple-400 rounded-tl-xl"/>
+                      <div className="absolute top-0 right-0 w-8 h-8 border-t-2 border-r-2 border-purple-400 rounded-tr-xl"/>
+                      <div className="absolute bottom-0 left-0 w-8 h-8 border-b-2 border-l-2 border-purple-400 rounded-bl-xl"/>
+                      <div className="absolute bottom-0 right-0 w-8 h-8 border-b-2 border-r-2 border-purple-400 rounded-br-xl"/>
+                      <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-0.5 bg-purple-400/60 animate-pulse"/>
+                    </div>
+                  </div>
+                  <div className="absolute bottom-3 left-0 right-0 text-center text-xs text-white/40">Point camera at student QR code</div>
+                </div>
+              )}
+              {scanFeedback&&(
+                <div className={`flex items-center gap-3 rounded-xl px-4 py-3 border ${scanFeedback.type==="success"?"bg-emerald-500/10 border-emerald-500/30":scanFeedback.type==="duplicate"?"bg-amber-500/10 border-amber-500/30":"bg-red-500/10 border-red-500/30"}`}>
+                  {scanFeedback.type==="success"?<CheckCircle size={20} className="text-emerald-400 flex-shrink-0"/>:scanFeedback.type==="duplicate"?<AlertCircle size={20} className="text-amber-400 flex-shrink-0"/>:<XCircle size={20} className="text-red-400 flex-shrink-0"/>}
+                  <div>
+                    <div className={`text-sm font-semibold ${scanFeedback.type==="success"?"text-emerald-300":scanFeedback.type==="duplicate"?"text-amber-300":"text-red-300"}`}>{scanFeedback.type==="success"?"✓ Success":scanFeedback.type==="duplicate"?"⚠ Already Marked":"✕ Error"}</div>
+                    <div className={`text-xs mt-0.5 ${scanFeedback.type==="success"?"text-emerald-400/70":scanFeedback.type==="duplicate"?"text-amber-400/70":"text-red-400/70"}`}>{scanFeedback.msg}</div>
+                  </div>
                 </div>
               )}
             </div>
-            <div className="bg-[#080D18] border border-white/5 rounded-xl p-4">
-              <div className="text-xs text-white/30 uppercase tracking-wider mb-3">Today — {today}</div>
-              {state.students.map(st=>{
-                const present=state.attendance[today]?.[st.rollNo];
-                return(
-                  <div key={st.id} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
-                    <div className="flex items-center gap-2"><img src={st.photo} className="w-6 h-6 rounded-full"/><span className="text-sm text-white">{st.name}</span></div>
-                    <div className="flex items-center gap-2">
-                      <span className={`w-2 h-2 rounded-full ${present?"bg-emerald-400":"bg-white/10"}`}/>
-                      <button onClick={()=>upd(s=>({...s,attendance:{...s.attendance,[today]:{...(s.attendance[today]||{}),[st.rollNo]:!present}}}))} className="text-xs text-white/30 hover:text-white/60 transition-colors">{present?"Undo":"Mark"}</button>
+            <div className="bg-[#080D18] border border-white/5 rounded-2xl p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xs font-semibold text-white/50 uppercase tracking-widest">Today — {todayDate}</h3>
+                <span className="text-xs text-white/30">{presentToday.length}/{allStudents.length} Present</span>
+              </div>
+              <div className="space-y-1 max-h-72 overflow-y-auto">
+                {allStudents.length===0&&<div className="text-white/20 text-sm text-center py-8">No students</div>}
+                {allStudents.map(st=>{
+                  const present=state.attendance[todayDate]?.[st.rollNo];
+                  return(
+                    <div key={st.id} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
+                      <div className="flex items-center gap-2">
+                        <img src={st.photo} className="w-7 h-7 rounded-full border border-white/10"/>
+                        <div><div className="text-sm text-white">{st.name}</div><div className="text-xs text-white/30 font-mono">{st.rollNo}</div></div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${present?"bg-emerald-500/20 text-emerald-400":"bg-red-500/10 text-red-400"}`}>{present?"Present":"Absent"}</span>
+                        <button onClick={()=>setState(s=>({...s,attendance:{...s.attendance,[todayDate]:{...(s.attendance[todayDate]||{}),[st.rollNo]:!present}}}))} className="text-xs text-white/20 hover:text-white/50 transition-colors border border-white/10 px-2 py-0.5 rounded-full">{present?"Undo":"Mark"}</button>
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
           </div>
-        </div>
-      );
+        );
+      }
 
       case "ledger":
         if(!lu) return(
@@ -1889,7 +2208,7 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
               <h2 className="text-xl font-bold text-white">Result Ledger</h2>
               <button onClick={()=>{setLU(false);setLP("");}} className="text-xs text-white/30 hover:text-white/60 border border-white/10 px-3 py-2 rounded-lg transition-colors">Lock</button>
             </div>
-            <MarksheetView state={state} classId={sc} onClassChange={setSC} availableClasses={state.classes}/>
+            <LedgerWithExams state={state} classId={sc} onClassChange={setSC}/>
           </div>
         );
 
@@ -1918,7 +2237,7 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
     const close=()=>setPopup(null);
     if(popup.type==="addClass"){let n="",sec="",tid="";return<Modal title="Add Class" onClose={close}><Field label="Class Name" onChange={v=>n=v}/><Field label="Section" onChange={v=>sec=v}/><SelField label="Class Teacher" options={state.teachers.map(t=>({value:t.id,label:t.name}))} onChange={v=>tid=v}/><MBtn onClick={async()=>{if(n&&sec){const id=uid();upd(s=>({...s,classes:[...s.classes,{id,name:n,section:sec,teacherId:tid}]}));try{await sb.upsert("classes",{id,name:n,section:sec,teacher_id:tid||null});}catch(e){console.warn("[sb.classes]",e);}close();}}}>Create</MBtn></Modal>;}
     // PHASE 1: Edit existing class teacher
-    if(popup.type==="editClass"){const cls=popup.data as Class;let tid=cls.teacherId;return<Modal title={`Edit Class ${cls.name}-${cls.section}`} onClose={close}><SelField label="Class Teacher" options={state.teachers.map(t=>({value:t.id,label:t.name}))} onChange={v=>tid=v}/><MBtn onClick={async()=>{upd(s=>({...s,classes:s.classes.map(c=>c.id===cls.id?{...c,teacherId:tid}:c)}));try{await sb.update("classes",cls.id,{teacher_id:tid||null});}catch(e){console.warn("[sb.classes update]",e);}close();}}>Save Changes</MBtn></Modal>;}
+    if(popup.type==="editClass"){const cls=popup.data as Class;let tid=cls.teacherId;return<Modal title={`Edit Class ${cls.name}-${cls.section}`} onClose={close}><SelField label="Class Teacher" options={[{value:"",label:"— Unassigned —"},...state.teachers.map(t=>({value:t.id,label:t.name}))]} onChange={v=>tid=v}/><MBtn onClick={async()=>{upd(s=>({...s,classes:s.classes.map(c=>c.id===cls.id?{...c,teacherId:tid}:c)}));try{await sb.update("classes",cls.id,{teacher_id:tid||null});}catch(e){console.warn("[sb.classes update]",e);}close();}}>Save Changes</MBtn></Modal>;}
     // PHASE 1: Added category field to addSubject
     if(popup.type==="addSubject"){let n="",code="",tid="",cat:SubjectCategory="General";let cids:string[]=[];return<Modal title="Add Subject" onClose={close}><Field label="Subject Name" onChange={v=>n=v}/><Field label="Code" onChange={v=>code=v.toUpperCase()}/><SelField label="Category" options={(["General","Science","Arts","Commerce"] as SubjectCategory[]).map(c=>({value:c,label:c}))} onChange={v=>cat=v as SubjectCategory}/><SelField label="Teacher" options={state.teachers.map(t=>({value:t.id,label:t.name}))} onChange={v=>tid=v}/><div><label className="text-xs text-white/40 uppercase block mb-2">Classes</label><div className="flex gap-3 flex-wrap">{state.classes.map(c=><label key={c.id} className="flex items-center gap-1.5 text-sm text-white cursor-pointer"><input type="checkbox" className="accent-blue-500" onChange={e=>{if(e.target.checked)cids.push(c.id);else cids=cids.filter(x=>x!==c.id);}}/>{c.name}-{c.section}</label>)}</div></div><MBtn onClick={async()=>{if(n&&code){const id=uid();upd(s=>({...s,subjects:[...s.subjects,{id,name:n,code,classIds:cids,teacherId:tid,category:cat}]}));try{await sb.upsert("subjects",{id,name:n,code,class_ids:cids,teacher_id:tid||null});}catch(e){console.warn("[sb.subjects]",e);}close();}}}>Create</MBtn></Modal>;}
     if(popup.type==="addTeacher"){let n="",e="",p="";return<Modal title="Add Teacher" onClose={close}><Field label="Full Name" onChange={v=>n=v}/><Field label="Email" onChange={v=>e=v}/><Field label="Password" onChange={v=>p=v}/><MBtn onClick={()=>{if(n&&e){const t:Teacher={id:uid(),name:n,email:e,subjectIds:[],classIds:[],password:p};db.addTeacher(t);close();}}}>Add</MBtn></Modal>;}
@@ -1929,7 +2248,7 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
   }
 
   return(
-    <Layout user={user} state={state} navItems={NAV} activeTab={tab} setTab={setTab} onLogout={onLogout}>
+    <Layout user={user} state={state} navItems={NAV} activeTab={tab} setTab={setTab} onLogout={onLogout} onBackToSite={onBackToSite}>
       {renderTab()}
       {popup&&<div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={e=>e.target===e.currentTarget&&setPopup(null)}>{renderPopup()}</div>}
       {editSt&&<div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"><StudentProfileModal student={editSt} state={state} onSave={u=>db.updateStudent(u)} onClose={()=>setEditSt(null)}/></div>}
@@ -1938,20 +2257,275 @@ function AdminView({user,state,setState,onLogout,isSA,db}:
   );
 }
 
+// ─── TEACHER ADD FEE POPUP ────────────────────────────────────────────────────
+function TeacherAddFeePopup({state,db,setState,scopedStudents,onClose}:{state:AppState;db:DbOps;setState:(fn:(s:AppState)=>AppState)=>void;scopedStudents:Student[];onClose:()=>void}){
+  const CAT_LABELS:Record<FeeCategory,string>={tuition:"Tuition",transport:"Transport",lab:"Lab",sports:"Sports",activity:"Activity",other:"Other"};
+  const [search,setSearch]=React.useState("");
+  const [selId,setSelId]=React.useState(scopedStudents[0]?.id||"");
+  const [cat,setCat]=React.useState<FeeCategory>("tuition");
+  const [label,setLabel]=React.useState("");
+  const [amount,setAmount]=React.useState(0);
+  const [dueDate,setDueDate]=React.useState(new Date().toISOString().split("T")[0]);
+  const [status,setStatus]=React.useState<"paid"|"unpaid"|"partial">("unpaid");
+  const [note,setNote]=React.useState("");
+  const filtered=scopedStudents.filter(s=>!search||s.name.toLowerCase().includes(search.toLowerCase())||s.rollNo.includes(search));
+  React.useEffect(()=>{if(!filtered.find(s=>s.id===selId)&&filtered.length>0)setSelId(filtered[0].id);},[search]);
+  const selSt=scopedStudents.find(s=>s.id===selId);
+  const selCls=selSt?state.classes.find(c=>c.id===selSt.classId):null;
+  function save(){
+    if(!label.trim()||!amount||!selId)return;
+    const rec:FeeRecord={id:uid(),studentId:selId,category:cat,label:label.trim(),amount,dueDate,status,paidDate:status==="paid"?new Date().toISOString().split("T")[0]:undefined,paidAmount:status==="paid"?amount:undefined,note:note.trim()||undefined};
+    db.addFee(rec);onClose();
+  }
+  return(
+    <div className="bg-[#080D18] border border-white/10 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
+      <div className="flex items-center justify-between"><h3 className="font-bold text-white">Add Fee Record</h3><button onClick={onClose} className="text-white/30 hover:text-white/60"><X size={16}/></button></div>
+      <div>
+        <label className="text-xs text-white/40 uppercase block mb-1.5">Student</label>
+        <div className="relative mb-2"><Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30"/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search name or roll number…" className="w-full pl-8 bg-white/5 border border-white/10 text-white text-xs rounded-xl px-3 py-2 outline-none focus:border-blue-500/50 placeholder-white/20"/></div>
+        {selSt&&<div className="flex items-center gap-3 bg-blue-500/10 border border-blue-500/20 rounded-xl px-3 py-2 mb-2"><div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500/30 to-purple-500/30 flex items-center justify-center text-sm font-bold text-white flex-shrink-0">{selSt.name[0]}</div><div className="flex-1 min-w-0"><div className="text-white text-xs font-semibold truncate">{selSt.name}</div><div className="text-white/40 text-[10px] font-mono">{selSt.rollNo} · {selCls?.name}-{selCls?.section}</div></div><div className="text-blue-400/50 text-[10px]">Selected</div></div>}
+        <div className="max-h-36 overflow-y-auto space-y-1 border border-white/5 rounded-xl p-1 bg-black/20">
+          {filtered.length===0&&<div className="text-center py-4 text-white/20 text-xs">No students found</div>}
+          {filtered.map(s=>{const cls=state.classes.find(c=>c.id===s.classId);return(<button key={s.id} onClick={()=>setSelId(s.id)} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-all ${selId===s.id?"bg-blue-600/20 border border-blue-500/30":"hover:bg-white/5 border border-transparent"}`}><div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-500/20 to-purple-500/20 flex items-center justify-center text-xs font-bold text-white flex-shrink-0">{s.name[0]}</div><div className="flex-1 min-w-0"><div className="text-white text-xs font-medium truncate">{s.name}</div><div className="text-white/30 text-[10px] font-mono">{s.rollNo} · {cls?.name}-{cls?.section}</div></div>{selId===s.id&&<Check size={12} className="text-blue-400 flex-shrink-0"/>}</button>);})}
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div><label className="text-xs text-white/40 uppercase block mb-1.5">Category</label><select value={cat} onChange={e=>setCat(e.target.value as FeeCategory)} className="w-full bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-3 py-2.5 outline-none">{Object.entries(CAT_LABELS).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></div>
+        <div><label className="text-xs text-white/40 uppercase block mb-1.5">Status</label><select value={status} onChange={e=>setStatus(e.target.value as any)} className="w-full bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-3 py-2.5 outline-none"><option value="unpaid">Unpaid</option><option value="paid">Paid</option><option value="partial">Partial</option></select></div>
+      </div>
+      <div><label className="text-xs text-white/40 uppercase block mb-1.5">Description *</label><input value={label} onChange={e=>setLabel(e.target.value)} placeholder="e.g. Term 2 Tuition Fee" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-emerald-500/50 placeholder-white/20"/></div>
+      <div className="grid grid-cols-2 gap-3">
+        <div><label className="text-xs text-white/40 uppercase block mb-1.5">Amount ({state.settings.currency})</label><input type="number" value={amount||""} onChange={e=>setAmount(Number(e.target.value))} className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-emerald-500/50 font-mono"/></div>
+        <div><label className="text-xs text-white/40 uppercase block mb-1.5">Due Date</label><input type="date" value={dueDate} onChange={e=>setDueDate(e.target.value)} className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-emerald-500/50"/></div>
+      </div>
+      <div><label className="text-xs text-white/40 uppercase block mb-1.5">Note (optional)</label><input value={note} onChange={e=>setNote(e.target.value)} placeholder="Additional info…" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-emerald-500/50 placeholder-white/20"/></div>
+      <button onClick={save} disabled={!label.trim()||!amount||!selId} className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-sm py-3 rounded-xl transition-colors font-medium flex items-center justify-center gap-2"><Save size={14}/>Save Record</button>
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // TEACHER VIEW
 // ═══════════════════════════════════════════════════════════════════════════════
-function TeacherView({user,state,setState,onLogout}:
-  {user:LoggedInUser;state:AppState;setState:(fn:(s:AppState)=>AppState)=>void;onLogout:()=>void}) {
+function TeacherView({user,state,setState,onLogout,onBackToSite,db}:
+  {user:LoggedInUser;state:AppState;setState:(fn:(s:AppState)=>AppState)=>void;onLogout:()=>void;onBackToSite?:()=>void;db:DbOps}) {
 
   const [tab,setTab]       = useState("profile");
   const [sc,setSC]         = useState("");
   const [ss,setSS]         = useState("");
   const [me,setME]         = useState<Record<string,string>>({});
+  const [marksMode,setMarksMode] = useState<"current"|"exam">("current");
+  const [marksYear,setMarksYear] = useState<number>(new Date().getFullYear());
+  const [marksExamId,setMarksExamId] = useState<string>("");
   const [search,setSearch] = useState("");
   const [shCls,setShCls]   = useState("");
   const [editSt,setEditSt] = useState<Student|null>(null);
-  const [editSelf,setEditSelf] = useState(false); // self profile edit
+  const [editSelf,setEditSelf] = useState(false);
+  // QR Attendance tab state (must be at top level — Rules of Hooks)
+  const [qrVal,setQrVal]           = useState("");
+  const [lastScanned,setLastScanned] = useState<Student|null>(null);
+  const [scanFeedback,setScanFeedback] = useState<{type:"success"|"error"|"duplicate";msg:string}|null>(null);
+  const [attMode,setAttMode]       = useState<"today"|"history">("today");
+  const [histDate,setHistDate]     = useState(new Date().toISOString().split("T")[0]);
+  const [cameraActive,setCameraActive] = useState(false);
+  const [camError,setCamError]     = useState("");
+  const videoRef = React.useRef<HTMLVideoElement>(null);
+  const canvasRef = React.useRef<HTMLCanvasElement>(null);
+  const scanLoopRef = React.useRef<number|null>(null);
+  // Fees tab state
+  const [feeSearch,setFeeSearch] = useState("");
+  const [showAddFee,setShowAddFee] = useState(false);
+  const [couClass,setCouClass]   = useState("");
+  const [couSearch,setCouSearch] = useState("");
+  // Counseling tab state
+  const [selSt,setSelSt]   = useState("");
+  const [issue,setIssue]   = useState("");
+  const [notes,setNotes]   = useState("");
+  const [followUp,setFollowUp] = useState("");
+  const [mood,setMood]     = useState<"good"|"neutral"|"concern"|"urgent">("neutral");
+  // QR scanner keyboard listener — must be at top level (Rules of Hooks)
+  useEffect(()=>{
+    if(tab!=="attendance") return;
+    const buf={val:""}; let timer:ReturnType<typeof setTimeout>;
+    function onKey(e:KeyboardEvent){
+      if((e.target as HTMLElement).tagName==="INPUT") return;
+      if(e.key==="Enter"){
+        if(buf.val.length>2){
+          const raw=buf.val.trim();
+          const roll=raw.replace(/^STUDENT:[^:]+:/,"").replace(/^STUDENT:/,"");
+          const todayDate=new Date().toISOString().split("T")[0];
+          // Resolve teacher for RBAC
+          const _t=state.teachers.find(t=>t.id===user.id);
+          const ownCls=_t ? state.classes.filter(c=>c.teacherId===_t.id) : [];
+          const scopedStudents=ownCls.length>0
+            ? state.students.filter(s=>ownCls.some(c=>c.id===s.classId)&&s.status!=="pending")
+            : state.students.filter(s=>s.status!=="pending");
+          const st=state.students.find(x=>x.status!=="pending"&&(x.rollNo===roll||x.rollNo===raw));
+          if(!st){ playBeep("error"); setScanFeedback({type:"error",msg:"Student not found: "+roll}); setTimeout(()=>setScanFeedback(null),3000); }
+          else if(!scopedStudents.some(s=>s.id===st.id)){ playBeep("error"); setScanFeedback({type:"error",msg:"Access denied: "+st.name+" is not in your class"}); setTimeout(()=>setScanFeedback(null),3000); }
+          else if(state.attendance[todayDate]?.[st.rollNo]){ playBeep("duplicate"); setScanFeedback({type:"duplicate",msg:st.name+" already marked present"}); setTimeout(()=>setScanFeedback(null),3000); }
+          else {
+            setState(s=>({...s,attendance:{...s.attendance,[todayDate]:{...(s.attendance[todayDate]||{}),[st.rollNo]:true}}}));
+            setLastScanned(st); setTimeout(()=>setLastScanned(null),3000);
+            playBeep("success"); setScanFeedback({type:"success",msg:st.name+" marked present ✓"}); setTimeout(()=>setScanFeedback(null),3000);
+            const profile=decProfile(st.profile); const parentPhone=profile.parentPhone||profile.phone||"";
+            if(parentPhone) notifyWhatsApp(parentPhone, st.name);
+          }
+        }
+        buf.val=""; clearTimeout(timer);
+      } else if(e.key.length===1){buf.val+=e.key; clearTimeout(timer); timer=setTimeout(()=>{buf.val="";},200);}
+    }
+    window.addEventListener("keydown",onKey);
+    return()=>{window.removeEventListener("keydown",onKey); clearTimeout(timer);};
+  },[tab]);
+
+  // Camera lifecycle — start/stop stream when cameraActive changes
+  useEffect(()=>{
+    if(!cameraActive){
+      if(scanLoopRef.current) cancelAnimationFrame(scanLoopRef.current);
+      if(videoRef.current?.srcObject){
+        (videoRef.current.srcObject as MediaStream).getTracks().forEach(t=>t.stop());
+        videoRef.current.srcObject=null;
+      }
+      return;
+    }
+    setCamError("");
+    let active=true;
+    (async()=>{
+      try{
+        const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"}},audio:false});
+        if(!active||!videoRef.current){stream.getTracks().forEach(t=>t.stop());return;}
+        videoRef.current.srcObject=stream;
+        await videoRef.current.play();
+
+        // ── QR decode strategy ──────────────────────────────────────────────
+        // 1. BarcodeDetector (Chrome 83+, Edge, Safari 17+, iOS 17+) — native, no CDN
+        // 2. jsQR via multiple CDN fallbacks — works iOS 14-16, Android, offline networks
+        // 3. Manual roll-number input always available as last resort
+        const hasBarcodeDetector = "BarcodeDetector" in window;
+        let detector: any = null;
+        if(hasBarcodeDetector){
+          try{
+            detector = new (window as any).BarcodeDetector({formats:["qr_code"]});
+          } catch{ /* ignore — will use jsQR path */ }
+        }
+
+        // Load jsQR if BarcodeDetector unavailable (iOS 16 and below, older Android)
+        if(!detector && !(window as any).jsQR){
+          // Try multiple CDN sources — increases reliability on restricted networks
+          const cdnSources = [
+            "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js",
+            "https://unpkg.com/jsqr@1.4.0/dist/jsQR.js",
+            "https://cdnjs.cloudflare.com/ajax/libs/jsqr/1.4.0/jsQR.min.js",
+          ];
+          let loaded = false;
+          for(const src of cdnSources){
+            if(loaded) break;
+            try{
+              await new Promise<void>((res,rej)=>{
+                const s=document.createElement("script");
+                s.src=src;
+                s.onload=()=>{loaded=true;res();};
+                s.onerror=()=>rej();
+                s.crossOrigin="anonymous";
+                document.head.appendChild(s);
+              });
+            } catch{ /* try next source */ }
+          }
+          if(!loaded){
+            // All CDNs failed — camera still works, manual entry available
+            setCamError("qr_no_lib");
+          }
+        }
+
+        async function tick(){
+          if(!active||!videoRef.current||!canvasRef.current) return;
+          const v=videoRef.current; const cv=canvasRef.current;
+          if(v.readyState!==v.HAVE_ENOUGH_DATA){scanLoopRef.current=requestAnimationFrame(tick);return;}
+          cv.width=v.videoWidth; cv.height=v.videoHeight;
+          const ctx=cv.getContext("2d"); if(!ctx){scanLoopRef.current=requestAnimationFrame(tick);return;}
+          ctx.drawImage(v,0,0,cv.width,cv.height);
+
+          let codeData:string|null=null;
+
+          // Try BarcodeDetector first (fast, native, no CDN)
+          if(detector){
+            try{
+              const results=await detector.detect(v);
+              if(results.length>0) codeData=results[0].rawValue;
+            } catch{ /* frame not ready */ }
+          } else if((window as any).jsQR){
+            // Fallback to jsQR
+            const imgData=ctx.getImageData(0,0,cv.width,cv.height);
+            const code=(window as any).jsQR(imgData.data,imgData.width,imgData.height,{inversionAttempts:"dontInvert"});
+            if(code?.data) codeData=code.data;
+          }
+
+          if(codeData){
+            const raw=codeData.trim();
+            const roll=raw.replace(/^STUDENT:[^:]+:/,"").replace(/^STUDENT:/,"");
+            const todayDate=new Date().toISOString().split("T")[0];
+            const _t=state.teachers.find(t=>t.id===user.id);
+            const ownCls=_t ? state.classes.filter(c=>c.teacherId===_t.id) : [];
+            const scopedStudents=ownCls.length>0
+              ? state.students.filter(s=>ownCls.some(c=>c.id===s.classId)&&s.status!=="pending")
+              : state.students.filter(s=>s.status!=="pending");
+            const st=state.students.find(x=>x.status!=="pending"&&(x.rollNo===roll||x.rollNo===raw));
+            if(!st){ playBeep("error"); setScanFeedback({type:"error",msg:"Student not found"}); setTimeout(()=>setScanFeedback(null),3000); }
+            else if(!scopedStudents.some(s=>s.id===st.id)){ playBeep("error"); setScanFeedback({type:"error",msg:"Access denied: "+st.name+" is not in your class"}); setTimeout(()=>setScanFeedback(null),3000); }
+            else if(state.attendance[todayDate]?.[st.rollNo]){ playBeep("duplicate"); setScanFeedback({type:"duplicate",msg:st.name+" already marked present"}); setTimeout(()=>setScanFeedback(null),3000); }
+            else {
+              setState(s=>({...s,attendance:{...s.attendance,[todayDate]:{...(s.attendance[todayDate]||{}),[st.rollNo]:true}}}));
+              setLastScanned(st); setTimeout(()=>setLastScanned(null),3000);
+              playBeep("success"); setScanFeedback({type:"success",msg:st.name+" marked present ✓"}); setTimeout(()=>setScanFeedback(null),3000);
+              const profile=decProfile(st.profile); const parentPhone=profile.parentPhone||profile.phone||"";
+              if(parentPhone) notifyWhatsApp(parentPhone, st.name);
+            }
+            setTimeout(()=>{if(active) scanLoopRef.current=requestAnimationFrame(tick);},1800);
+            return;
+          }
+          scanLoopRef.current=requestAnimationFrame(tick);
+        }
+        scanLoopRef.current=requestAnimationFrame(tick);
+      } catch(e:any){
+        if(!active) return;
+        const name=e?.name||"";
+        const msg=
+          name==="NotAllowedError"||name==="PermissionDeniedError"
+            ? "Permission denied. Tap the 🔒 lock icon in your browser's address bar → allow Camera, then try again."
+          : name==="NotFoundError"||name==="DevicesNotFoundError"
+            ? "No camera found on this device."
+          : name==="NotReadableError"||name==="TrackStartError"
+            ? "Camera is in use by another app (e.g. video call). Close it and try again."
+          : name==="OverconstrainedError"
+            ? "Rear camera not available — retrying with any camera…"
+          : name==="SecurityError"
+            ? "Camera blocked: this page must be served over HTTPS or localhost."
+          : `Camera error: ${e?.message||name||"unknown"}`;
+        if(name==="OverconstrainedError"){
+          try{
+            const stream2=await navigator.mediaDevices.getUserMedia({video:true,audio:false});
+            if(!active||!videoRef.current){stream2.getTracks().forEach(t=>t.stop());return;}
+            videoRef.current.srcObject=stream2;
+            await videoRef.current.play();
+            setCamError("");
+            return;
+          } catch(e2:any){ setCamError(`No usable camera found: ${e2?.message||""}`); }
+        } else {
+          setCamError(msg);
+        }
+        setCameraActive(false);
+      }
+    })();
+    return()=>{
+      active=false;
+      if(scanLoopRef.current) cancelAnimationFrame(scanLoopRef.current);
+      if(videoRef.current?.srcObject) (videoRef.current.srcObject as MediaStream).getTracks().forEach(t=>t.stop());
+    };
+  },[cameraActive]);
+
+  // Stop camera when leaving attendance tab
+  useEffect(()=>{ if(tab!=="attendance") setCameraActive(false); },[tab]);
 
   const _teacher   = state.teachers.find(t=>t.id===user.id);
   // State still loading from Supabase — teacher not hydrated yet
@@ -1971,8 +2545,10 @@ function TeacherView({user,state,setState,onLogout}:
   const myOwnCls   = state.classes.filter(c=>c.teacherId===teacher.id);
 
   const isClassTeacher = myOwnCls.length > 0;
+  const hasAssignedLab = state.inventory.labs.some(l=>l.assignedTeacherId===teacher.id);
 
   const NAV=[
+    {id:"dashboard",  label:"Dashboard",      icon:LayoutDashboard},
     {id:"profile",    label:"My Profile",     icon:User},
     {id:"marks",      label:"Enter Marks",    icon:Award},
     {id:"timetable",  label:"My Schedule",    icon:Clock},
@@ -1986,10 +2562,56 @@ function TeacherView({user,state,setState,onLogout}:
     ...(isClassTeacher || teacher.is_bursar ? [{id:"fees", label:"Fees & Finance", icon:DollarSign}] : []),
     // PHASE 2: Counseling — only for counselors
     ...(teacher.is_counselor ? [{id:"counseling", label:"Counseling", icon:HeartHandshake}] : []),
+    ...(hasAssignedLab ? [{id:"inventory", label:"My Lab", icon:Package}] : []),
   ];
 
   function renderTab(){
     switch(tab){
+
+      case "dashboard": {
+        const totalStudents=myClasses.reduce((a,cls)=>a+state.students.filter(s=>s.classId===cls.id).length,0);
+        const totalSubjects=mySubjects.length;
+        const totalClasses=myClasses.length;
+        const ownStudents=myOwnCls.reduce((a,cls)=>a+state.students.filter(s=>s.classId===cls.id).length,0);
+        return(
+          <div className="space-y-6">
+            <h2 className="text-xl font-bold text-white">Dashboard</h2>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {[
+                {label:"My Classes",    value:totalClasses,    icon:BookOpen,    color:"blue"},
+                {label:"My Subjects",   value:totalSubjects,   icon:Award,       color:"purple"},
+                {label:"My Students",   value:totalStudents,   icon:Users,       color:"emerald"},
+                {label:"Class Teacher", value:myOwnCls.length?"Yes":"No", icon:GraduationCap, color:"amber"},
+              ].map(({label,value,icon:Icon,color})=>(
+                <div key={label} className="bg-[#080D18] border border-white/5 rounded-2xl p-5">
+                  <div className={`w-10 h-10 rounded-xl bg-${color}-500/10 border border-${color}-500/20 flex items-center justify-center mb-3`}><Icon size={18} className={`text-${color}-400`}/></div>
+                  <div className="text-2xl font-bold text-white">{value}</div>
+                  <div className="text-xs text-white/40 mt-0.5">{label}</div>
+                </div>
+              ))}
+            </div>
+            {myOwnCls.length>0&&(
+              <div className="bg-[#080D18] border border-white/5 rounded-2xl p-5">
+                <h3 className="text-white/50 text-xs font-semibold uppercase tracking-widest mb-3">My Class{myOwnCls.length>1?"es":""}</h3>
+                <div className="flex gap-3 flex-wrap">
+                  {myOwnCls.map(cls=>{
+                    const cnt=state.students.filter(s=>s.classId===cls.id).length;
+                    return(<div key={cls.id} className="bg-blue-500/10 border border-blue-500/20 rounded-xl px-4 py-3"><div className="text-white font-semibold">Class {cls.name}-{cls.section}</div><div className="text-blue-300 text-xs mt-0.5">{cnt} student{cnt!==1?"s":""}</div></div>);
+                  })}
+                </div>
+              </div>
+            )}
+            {mySubjects.length>0&&(
+              <div className="bg-[#080D18] border border-white/5 rounded-2xl p-5">
+                <h3 className="text-white/50 text-xs font-semibold uppercase tracking-widest mb-3">My Subjects</h3>
+                <div className="flex gap-2 flex-wrap">
+                  {mySubjects.map(s=><span key={s.id} className="bg-purple-500/10 border border-purple-500/20 text-purple-300 text-xs px-3 py-1.5 rounded-full">{s.name} <span className="text-purple-400/50 font-mono">{s.code}</span></span>)}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      }
 
       case "profile": return(
         <div className="space-y-6 max-w-2xl">
@@ -2045,9 +2667,34 @@ function TeacherView({user,state,setState,onLogout}:
         </div>
       );
 
-      case "marks": return(
+      case "marks": {
+        const examYears=[...new Set(state.exams.map(e=>e.year))].sort((a,b)=>b-a);
+        const examsForYear=state.exams.filter(e=>e.year===(marksYear||examYears[0]));
+        const isSavingToExam=marksMode==="exam"&&marksExamId;
+        return(
         <div className="space-y-4 max-w-3xl">
           <h2 className="text-xl font-bold text-white">Enter Marks</h2>
+          {/* Mode toggle */}
+          <div className="flex gap-2 p-1 bg-white/5 rounded-xl w-fit">
+            <button onClick={()=>setMarksMode("current")} className={`text-xs px-4 py-2 rounded-lg font-medium transition-all ${marksMode==="current"?"bg-blue-600 text-white":"text-white/40 hover:text-white/70"}`}>Current Marks</button>
+            <button onClick={()=>setMarksMode("exam")} className={`text-xs px-4 py-2 rounded-lg font-medium transition-all ${marksMode==="exam"?"bg-purple-600 text-white":"text-white/40 hover:text-white/70"}`}>Exam Records</button>
+          </div>
+          {/* Exam selector row */}
+          {marksMode==="exam"&&(
+            <div className="flex gap-3 flex-wrap items-center bg-purple-500/5 border border-purple-500/20 rounded-xl p-3">
+              <select value={marksYear||examYears[0]||""} onChange={e=>setMarksYear(Number(e.target.value))} className="bg-[#05080F] border border-white/10 text-white text-sm rounded-lg px-3 py-2 outline-none">
+                {examYears.map(y=><option key={y} value={y}>{y}</option>)}
+              </select>
+              <select value={marksExamId} onChange={e=>setMarksExamId(e.target.value)} className="bg-[#05080F] border border-white/10 text-white text-sm rounded-lg px-3 py-2 outline-none">
+                <option value="">— Select Exam —</option>
+                {examsForYear.map(ex=><option key={ex.id} value={ex.id}>{ex.name}</option>)}
+              </select>
+              {marksExamId&&<span className="text-xs text-purple-300 bg-purple-500/10 px-2 py-1 rounded-full">{state.exams.find(e=>e.id===marksExamId)?.name}</span>}
+            </div>
+          )}
+          {marksMode==="exam"&&state.exams.length===0&&(
+            <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 text-amber-300 text-sm">No exams created yet. Ask admin to create an exam first.</div>
+          )}
           <div className="flex gap-3 flex-wrap">
             <select value={sc} onChange={e=>setSC(e.target.value)} className="bg-[#080D18] border border-white/10 text-white text-sm rounded-lg px-3 py-2 outline-none focus:border-blue-500/50">
               <option value="">Select Class</option>
@@ -2061,24 +2708,31 @@ function TeacherView({user,state,setState,onLogout}:
           {sc&&ss?(
             <div className="bg-[#080D18] border border-white/5 rounded-xl overflow-hidden">
               <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between">
-                <span className="text-sm text-white/60">{state.subjects.find(s=>s.id===ss)?.name}</span>
+                <span className="text-sm text-white/60">{state.subjects.find(s=>s.id===ss)?.name} {isSavingToExam&&<span className="text-purple-400 text-xs ml-2">→ {state.exams.find(e=>e.id===marksExamId)?.name}</span>}</span>
                 <button onClick={()=>{
-                  const upds:Record<string,number>={};
-                  Object.entries(me).forEach(([id,v])=>{const n=parseFloat(v);if(!isNaN(n))upds[id]=n;});
-                  setState(s=>{
-                    const updated=s.students.map(st=>upds[st.id]!==undefined?{...st,marks:{...st.marks,[ss]:upds[st.id]}}:st);
-                    updated.filter(st=>upds[st.id]!==undefined).forEach(st=>{
-                      try{sb.update("students",st.id,{marks:st.marks});}catch{}
+                  if(marksMode==="exam"&&marksExamId){
+                    const newRecs:ExamRecord[]=[];
+                    const classStudents=state.students.filter(s=>s.classId===sc);
+                    Object.entries(me).forEach(([id,v])=>{const n=parseFloat(v);if(!isNaN(n))newRecs.push({id:uid(),examId:marksExamId,studentId:id,subjectId:ss,marks:n});});
+                    setState(s=>({...s,examRecords:[...s.examRecords.filter(r=>!(r.examId===marksExamId&&r.subjectId===ss&&classStudents.some(st=>st.id===r.studentId))),...newRecs]}));
+                  } else {
+                    const upds:Record<string,number>={};
+                    Object.entries(me).forEach(([id,v])=>{const n=parseFloat(v);if(!isNaN(n))upds[id]=n;});
+                    setState(s=>{
+                      const updated=s.students.map(st=>upds[st.id]!==undefined?{...st,marks:{...st.marks,[ss]:upds[st.id]}}:st);
+                      updated.filter(st=>upds[st.id]!==undefined).forEach(st=>{try{sb.update("students",st.id,{marks:st.marks});}catch{}});
+                      return {...s,students:updated};
                     });
-                    return {...s,students:updated};
-                  });
+                  }
                   setME({});
-                }} className="flex items-center gap-2 text-xs bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 px-3 py-1.5 rounded-lg hover:bg-emerald-500/30 transition-colors"><Save size={12}/>Save All</button>
+                }} className={`flex items-center gap-2 text-xs ${isSavingToExam?"bg-purple-500/20 text-purple-400 border-purple-500/20 hover:bg-purple-500/30":"bg-emerald-500/20 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/30"} border px-3 py-1.5 rounded-lg transition-colors`}><Save size={12}/>Save {isSavingToExam?"to Exam":""}</button>
               </div>
               <table className="w-full">
-                <thead><tr className="border-b border-white/5">{["Student","Roll","Current","Enter /100"].map(h=><th key={h} className="text-left text-xs font-semibold text-white/40 uppercase px-4 py-3">{h}</th>)}</tr></thead>
+                <thead><tr className="border-b border-white/5">{["Student","Roll","Previous","Enter /100"].map(h=><th key={h} className="text-left text-xs font-semibold text-white/40 uppercase px-4 py-3">{h}</th>)}</tr></thead>
                 <tbody>{state.students.filter(s=>s.classId===sc).map(st=>{
-                  const cur=st.marks[ss];
+                  const cur=marksMode==="exam"&&marksExamId
+                    ? (state.examRecords.find(r=>r.examId===marksExamId&&r.studentId===st.id&&r.subjectId===ss)?.marks)
+                    : st.marks[ss];
                   return(
                     <tr key={st.id} className="border-b border-white/5 hover:bg-white/5">
                       <td className="px-4 py-3"><div className="flex items-center gap-2"><img src={st.photo} className="w-7 h-7 rounded-full"/><span className="text-sm text-white">{st.name}</span></div></td>
@@ -2093,6 +2747,7 @@ function TeacherView({user,state,setState,onLogout}:
           ):<div className="text-white/30 text-sm text-center py-16 bg-[#080D18] border border-white/5 rounded-xl">Select a class and subject to begin</div>}
         </div>
       );
+      }
 
       case "timetable": return(
         <div className="space-y-4">
@@ -2215,11 +2870,10 @@ function TeacherView({user,state,setState,onLogout}:
               <div className="text-white/20 text-xs mt-1">Ask admin to assign you as a class teacher to view marksheets</div>
             </div>
           ):(
-            <MarksheetView
+            <LedgerWithExams
               state={state}
               classId={shCls||myOwnCls[0]?.id}
               onClassChange={setShCls}
-              availableClasses={myOwnCls}
             />
           )}
         </div>
@@ -2228,39 +2882,155 @@ function TeacherView({user,state,setState,onLogout}:
       // PHASE 3: QR Attendance for class teachers
       case "attendance": {
         const todayDate = new Date().toISOString().split("T")[0];
-        const [qrVal, setQrVal] = React.useState("");
-        const [lastScanned, setLastScanned] = React.useState<Student|null>(null);
-        const myStudents = state.students.filter(s=>myOwnCls.some(c=>c.id===s.classId));
-        function markPresent(rollOrQr: string){
-          const roll=rollOrQr.trim().replace(/^STUDENT:[^:]+:/,"").replace(/^STUDENT:/,"");
-          const st=myStudents.find(s=>s.rollNo===roll||s.rollNo===rollOrQr.trim());
-          if(!st) return;
-          setState(s=>({...s,attendance:{...s.attendance,[todayDate]:{...(s.attendance[todayDate]||{}),[st.rollNo]:true}}}));
-          setLastScanned(st); setQrVal(""); setTimeout(()=>setLastScanned(null),3000);
+        // RBAC: super admin sees all students; class teacher sees own class only
+        const isSuperAdmin = teacher.id==="admin" || (state.teachers.find(t=>t.id===teacher.id)?.id==="admin");
+        const myStudents = myOwnCls.length>0
+          ? state.students.filter(s=>myOwnCls.some(c=>c.id===s.classId))
+          : state.students.filter(s=>s.status!=="pending"); // fallback: all approved
+
+        function showFeedback(type:"success"|"error"|"duplicate", msg:string){
+          playBeep(type);
+          setScanFeedback({type,msg});
+          setTimeout(()=>setScanFeedback(null),3000);
         }
-        React.useEffect(()=>{
-          const buf={val:""}; let timer:ReturnType<typeof setTimeout>;
-          function onKey(e:KeyboardEvent){
-            if((e.target as HTMLElement).tagName==="INPUT") return;
-            if(e.key==="Enter"){if(buf.val.length>2) markPresent(buf.val); buf.val=""; clearTimeout(timer);}
-            else if(e.key.length===1){buf.val+=e.key; clearTimeout(timer); timer=setTimeout(()=>{buf.val="";},200);}
+
+        function markPresent(rollOrQr: string){
+          const raw=rollOrQr.trim();
+          if(!raw) return;
+          const roll=raw.replace(/^STUDENT:[^:]+:/,"").replace(/^STUDENT:/,"");
+
+          // Find student — RBAC check
+          const allApproved=state.students.filter(s=>s.status!=="pending");
+          const st=allApproved.find(s=>s.rollNo===roll||s.rollNo===raw);
+          if(!st){ showFeedback("error","Student not found: "+roll); setQrVal(""); return; }
+
+          // RBAC: class teacher can only mark their own class
+          const isMyStudent=myStudents.some(s=>s.id===st.id);
+          if(!isMyStudent){ showFeedback("error","Access denied: "+st.name+" is not in your class"); setQrVal(""); return; }
+
+          // Duplicate check
+          if(state.attendance[todayDate]?.[st.rollNo]){
+            showFeedback("duplicate", st.name+" is already marked present");
+            setQrVal(""); return;
           }
-          window.addEventListener("keydown",onKey);
-          return()=>{window.removeEventListener("keydown",onKey); clearTimeout(timer);};
-        },[state.students,state.attendance]);
+
+          // Mark present
+          setState(s=>({...s,attendance:{...s.attendance,[todayDate]:{...(s.attendance[todayDate]||{}),[st.rollNo]:true}}}));
+          setLastScanned(st);
+          showFeedback("success", st.name+" marked present ✓");
+          setQrVal("");
+          setTimeout(()=>setLastScanned(null),3000);
+
+          // WhatsApp notification (fire-and-forget)
+          const profile=decProfile(st.profile);
+          const parentPhone=profile.parentPhone||profile.phone||"";
+          if(parentPhone) notifyWhatsApp(parentPhone, st.name);
+        }
         return(
           <div className="space-y-5 max-w-2xl">
-            <div><h2 className="text-xl font-bold text-white">QR Attendance</h2><p className="text-white/30 text-xs mt-0.5">Hybrid: manual input + USB/Bluetooth barcode scanner support</p></div>
+            <div><h2 className="text-xl font-bold text-white">QR Attendance</h2><p className="text-white/30 text-xs mt-0.5">Manual input · USB/Bluetooth scanner · Mobile camera</p></div>
             <div className="bg-[#080D18] border border-white/5 rounded-2xl p-5 space-y-4">
-              <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2.5"><Wifi size={12}/><span>USB/Bluetooth scanners: click outside the input box and scan directly</span></div>
-              <div><label className="text-xs text-white/40 uppercase tracking-wider block mb-2">Roll Number / QR</label>
+              {/* Mode hints */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2"><Wifi size={11}/><span>USB/Bluetooth: click outside input, then scan</span></div>
+                <div className="flex items-center gap-2 text-xs text-blue-400 bg-blue-500/10 border border-blue-500/20 rounded-xl px-3 py-2"><Camera size={11}/><span>Mobile: tap "Scan with Camera" below</span></div>
+              </div>
+              {/* Manual input row */}
+              <div><label className="text-xs text-white/40 uppercase tracking-wider block mb-2">Roll Number / QR Code</label>
                 <div className="flex gap-2">
                   <input value={qrVal} onChange={e=>setQrVal(e.target.value)} onKeyDown={e=>e.key==="Enter"&&markPresent(qrVal)} placeholder="Type roll number or scan…" className="flex-1 bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 font-mono placeholder-white/20"/>
                   <button onClick={()=>markPresent(qrVal)} className="bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-2.5 rounded-xl transition-colors flex items-center gap-2"><Check size={14}/>Mark</button>
                 </div>
               </div>
-              {lastScanned&&<div className="flex items-center gap-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl px-4 py-3"><CheckCircle size={16} className="text-emerald-400"/><div><div className="text-sm font-medium text-emerald-300">{lastScanned.name} marked present</div><div className="text-xs text-emerald-400/60">Roll: {lastScanned.rollNo}</div></div></div>}
+              {/* Camera toggle button */}
+              <button onClick={()=>setCameraActive(v=>!v)}
+                className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl border text-sm font-medium transition-all ${cameraActive?"bg-red-500/15 border-red-500/30 text-red-400 hover:bg-red-500/25":"bg-purple-500/10 border-purple-500/30 text-purple-300 hover:bg-purple-500/20"}`}>
+                <Camera size={15}/>{cameraActive?"Stop Camera":"Scan with Camera (iOS / Android / Webcam)"}
+              </button>
+              {/* Camera error with help steps */}
+              {camError&&(
+                <div className={`border rounded-xl p-4 space-y-3 ${camError==="qr_no_lib"?"bg-amber-500/8 border-amber-500/20":camError.includes("local network")||camError.includes("unavailable")?"bg-amber-500/8 border-amber-500/20":"bg-red-500/8 border-red-500/20"}`}>
+                  <div className={`flex items-start gap-2 text-sm ${camError==="qr_no_lib"||camError.includes("local network")||camError.includes("unavailable")?"text-amber-400":"text-red-400"}`}>
+                    <AlertCircle size={15} className="flex-shrink-0 mt-0.5"/>
+                    <span>{camError==="qr_no_lib"?"Camera is working but QR library could not be loaded (no internet connection).":camError}</span>
+                  </div>
+                  {camError==="qr_no_lib"&&(
+                    <div className="text-xs text-amber-300/70 space-y-2">
+                      <div className="bg-amber-500/8 border border-amber-500/15 rounded-lg p-2.5 space-y-1">
+                        <div className="font-semibold text-amber-300/80 mb-1">📷 Camera is active — 3 ways to mark attendance:</div>
+                        <div>① <strong>Type</strong> the roll number in the input above and press Enter</div>
+                        <div>② <strong>USB/Bluetooth QR scanner</strong> — point at student QR, it auto-fills</div>
+                        <div>③ <strong>Connect to internet</strong> then tap Retry to enable camera QR scanning</div>
+                      </div>
+                      <button onClick={()=>{setCamError("");setCameraActive(false);setTimeout(()=>setCameraActive(true),300);}} className="w-full text-xs border border-amber-500/30 text-amber-400 hover:bg-amber-500/10 py-2 rounded-lg transition-colors">↺ Retry (requires internet)</button>
+                    </div>
+                  )}
+                  {!camError.includes("qr_no_lib")&&!(camError.includes("local network")||camError.includes("unavailable"))&&(
+                    <div className="text-xs text-white/40 space-y-1.5 pl-1">
+                      <div className="font-semibold text-white/50 mb-2">Try these fixes:</div>
+                      <div>① Tap the 🔒 lock in the address bar → Site settings → Camera → Allow</div>
+                      <div>② Make sure no other app (WhatsApp, Teams, Zoom) is using the camera</div>
+                      <div>③ On iPhone: Settings → Safari → Camera → Allow</div>
+                      <div>④ Hard-refresh the page then try again</div>
+                    </div>
+                  )}
+                  {(camError.includes("local network")||camError.includes("unavailable"))&&(
+                    <div className="text-xs text-amber-300/60 bg-amber-500/5 border border-amber-500/10 rounded-lg p-2">
+                      💡 Camera is working — type or scan roll numbers manually in the input above. QR scanning needs internet to load its library.
+                    </div>
+                  )}
+                  {!camError.includes("qr_no_lib")&&!(camError.includes("local network")||camError.includes("unavailable"))&&(
+                    <button onClick={()=>{setCamError("");setCameraActive(true);}} className="w-full text-xs border border-red-500/20 text-red-400 hover:bg-red-500/10 py-2 rounded-lg transition-colors">Retry Camera</button>
+                  )}
+                </div>
+              )}
+              {/* Camera viewfinder */}
+              {cameraActive&&(
+                <div className="relative rounded-2xl overflow-hidden bg-black border border-purple-500/20" style={{aspectRatio:"4/3"}}>
+                  <video ref={videoRef} className="w-full h-full object-cover" playsInline muted/>
+                  <canvas ref={canvasRef} className="hidden"/>
+                  {/* Scanning overlay */}
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div className="relative w-48 h-48">
+                      <div className="absolute inset-0 border-2 border-white/20 rounded-xl"/>
+                      <div className="absolute top-0 left-0 w-8 h-8 border-t-2 border-l-2 border-purple-400 rounded-tl-xl"/>
+                      <div className="absolute top-0 right-0 w-8 h-8 border-t-2 border-r-2 border-purple-400 rounded-tr-xl"/>
+                      <div className="absolute bottom-0 left-0 w-8 h-8 border-b-2 border-l-2 border-purple-400 rounded-bl-xl"/>
+                      <div className="absolute bottom-0 right-0 w-8 h-8 border-b-2 border-r-2 border-purple-400 rounded-br-xl"/>
+                      <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-0.5 bg-purple-400/60 animate-pulse"/>
+                    </div>
+                  </div>
+                  <div className="absolute bottom-3 left-0 right-0 text-center text-xs text-white/40">Point camera at student QR code</div>
+                </div>
+              )}
+              {/* Scan feedback — success / duplicate / error */}
+              {scanFeedback&&(
+                <div className={`flex items-center gap-3 rounded-xl px-4 py-3 border transition-all ${
+                  scanFeedback.type==="success"?"bg-emerald-500/10 border-emerald-500/30":
+                  scanFeedback.type==="duplicate"?"bg-amber-500/10 border-amber-500/30":
+                  "bg-red-500/10 border-red-500/30"}`}>
+                  {scanFeedback.type==="success"
+                    ?<CheckCircle size={20} className="text-emerald-400 flex-shrink-0"/>
+                    :scanFeedback.type==="duplicate"
+                    ?<AlertCircle size={20} className="text-amber-400 flex-shrink-0"/>
+                    :<XCircle size={20} className="text-red-400 flex-shrink-0"/>}
+                  <div>
+                    <div className={`text-sm font-semibold ${scanFeedback.type==="success"?"text-emerald-300":scanFeedback.type==="duplicate"?"text-amber-300":"text-red-300"}`}>
+                      {scanFeedback.type==="success"?"✓ Success":scanFeedback.type==="duplicate"?"⚠ Already Marked":"✕ Error"}
+                    </div>
+                    <div className={`text-xs mt-0.5 ${scanFeedback.type==="success"?"text-emerald-400/70":scanFeedback.type==="duplicate"?"text-amber-400/70":"text-red-400/70"}`}>
+                      {scanFeedback.msg}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
+            {/* Mode tabs */}
+            <div className="flex gap-2 p-1 bg-white/5 rounded-xl w-fit">
+              <button onClick={()=>setAttMode("today")} className={`text-xs px-4 py-2 rounded-lg font-medium transition-all ${attMode==="today"?"bg-blue-600 text-white":"text-white/40 hover:text-white/70"}`}>Today</button>
+              <button onClick={()=>setAttMode("history")} className={`text-xs px-4 py-2 rounded-lg font-medium transition-all ${attMode==="history"?"bg-purple-600 text-white":"text-white/40 hover:text-white/70"}`}>History</button>
+            </div>
+            {attMode==="today"&&(
             <div className="bg-[#080D18] border border-white/5 rounded-xl overflow-hidden">
               <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between"><span className="text-xs font-semibold text-white/50 uppercase">Today — {todayDate}</span><span className="text-xs text-white/30">{myStudents.filter(s=>state.attendance[todayDate]?.[s.rollNo]).length}/{myStudents.length} Present</span></div>
               <div className="divide-y divide-white/5">{myStudents.map(s=>{
@@ -2270,6 +3040,72 @@ function TeacherView({user,state,setState,onLogout}:
                 </div>);
               })}</div>
             </div>
+            )}
+            {attMode==="history"&&(
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 flex-wrap">
+                <label className="text-xs text-white/40 uppercase">Select Date</label>
+                <input type="date" value={histDate} onChange={e=>setHistDate(e.target.value)} max={todayDate}
+                  className="bg-[#080D18] border border-white/10 text-white text-sm rounded-xl px-3 py-2 outline-none focus:border-purple-500/50"/>
+                {state.attendance[histDate]&&(
+                  <span className="text-xs text-purple-300 bg-purple-500/10 border border-purple-500/20 px-3 py-1.5 rounded-full">
+                    {myStudents.filter(s=>state.attendance[histDate]?.[s.rollNo]).length}/{myStudents.length} present
+                  </span>
+                )}
+              </div>
+              {!state.attendance[histDate]?(
+                <div className="bg-[#080D18] border border-white/5 rounded-xl p-12 text-center text-white/20 text-sm">No attendance record for {histDate}</div>
+              ):(
+                <div className="bg-[#080D18] border border-white/5 rounded-xl overflow-hidden">
+                  <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between">
+                    <span className="text-xs font-semibold text-white/50 uppercase">{histDate}</span>
+                    <div className="flex gap-3 text-xs">
+                      <span className="text-emerald-400">{myStudents.filter(s=>state.attendance[histDate]?.[s.rollNo]).length} present</span>
+                      <span className="text-red-400">{myStudents.filter(s=>!state.attendance[histDate]?.[s.rollNo]).length} absent</span>
+                    </div>
+                  </div>
+                  <div className="divide-y divide-white/5">
+                    {myStudents.map(s=>{
+                      const present=state.attendance[histDate]?.[s.rollNo];
+                      const cls=state.classes.find(cl=>cl.id===s.classId);
+                      return(
+                        <div key={s.id} className="flex items-center justify-between px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <img src={s.photo} className="w-7 h-7 rounded-full"/>
+                            <span className="text-sm text-white">{s.name}</span>
+                            <span className="text-xs text-white/30 font-mono">{s.rollNo}</span>
+                            <span className="text-xs text-white/20">{cls?.name}-{cls?.section}</span>
+                          </div>
+                          <span className={`text-xs px-3 py-1 rounded-full font-medium ${present?"bg-emerald-500/20 text-emerald-400 border border-emerald-500/30":"bg-red-500/10 text-red-400/60 border border-red-500/10"}`}>{present?"Present":"Absent"}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              {/* All dates with records summary */}
+              <div className="bg-[#080D18] border border-white/5 rounded-xl p-4">
+                <div className="text-xs text-white/30 font-semibold uppercase tracking-widest mb-3">Attendance History Summary</div>
+                <div className="space-y-1 max-h-48 overflow-y-auto">
+                  {Object.keys(state.attendance).sort().reverse().map(date=>{
+                    const presentCount=myStudents.filter(s=>state.attendance[date]?.[s.rollNo]).length;
+                    const pct=myStudents.length>0?Math.round(presentCount/myStudents.length*100):0;
+                    return(
+                      <button key={date} onClick={()=>setHistDate(date)}
+                        className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-left transition-all ${histDate===date?"bg-purple-500/10 border border-purple-500/20":"hover:bg-white/5 border border-transparent"}`}>
+                        <span className="text-white/60 text-xs font-mono">{date}</span>
+                        <div className="flex items-center gap-3">
+                          <div className="w-24 h-1.5 bg-white/5 rounded-full overflow-hidden"><div className="h-full bg-emerald-500/60 rounded-full" style={{width:`${pct}%`}}/></div>
+                          <span className="text-xs text-white/30 w-16 text-right">{presentCount}/{myStudents.length} ({pct}%)</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                  {Object.keys(state.attendance).length===0&&<div className="text-white/20 text-xs text-center py-4">No records yet</div>}
+                </div>
+              </div>
+            </div>
+            )}
           </div>
         );
       }
@@ -2302,14 +3138,14 @@ function TeacherView({user,state,setState,onLogout}:
         const allowedStudents=isBursar?state.students:state.students.filter(s=>myOwnCls.some(c=>c.id===s.classId));
         const allowedIds=allowedStudents.map(s=>s.id);
         const feeRecords=state.fees.records.filter(r=>allowedIds.includes(r.studentId));
-        const [feeSearch,setFeeSearch]=React.useState("");
         const filteredRecs=feeRecords.filter(r=>{const st=state.students.find(s=>s.id===r.studentId);return !feeSearch||st?.name.toLowerCase().includes(feeSearch.toLowerCase())||st?.rollNo.includes(feeSearch);});
         const total=feeRecords.reduce((a,r)=>a+r.amount,0);
         const paid=feeRecords.filter(r=>r.status==="paid").reduce((a,r)=>a+(r.paidAmount||r.amount),0);
         const currency=state.settings.currency;
         return(
+          <>
           <div className="space-y-5">
-            <div><h2 className="text-xl font-bold text-white">Fees &amp; Finance</h2><p className="text-white/30 text-xs mt-0.5">{isBursar?"Bursar view — all students":"Class teacher view — your class only"}</p></div>
+            <div className="flex items-center justify-between"><div><h2 className="text-xl font-bold text-white">Fees &amp; Finance</h2><p className="text-white/30 text-xs mt-0.5">{isBursar?"Bursar view — all students":"Class teacher view — your class only"}</p></div><button onClick={()=>setShowAddFee(true)} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm px-4 py-2 rounded-xl transition-colors font-medium"><Plus size={14}/>Add Fee Record</button></div>
             <div className="grid grid-cols-2 gap-4">
               <div className="bg-[#080D18] border border-emerald-500/20 rounded-xl p-4"><div className="text-xs text-white/40 mb-1">Collected</div><div className="text-xl font-bold text-emerald-400">{currency} {paid.toLocaleString()}</div></div>
               <div className="bg-[#080D18] border border-orange-500/20 rounded-xl p-4"><div className="text-xs text-white/40 mb-1">Outstanding</div><div className="text-xl font-bold text-orange-400">{currency} {(total-paid).toLocaleString()}</div></div>
@@ -2323,46 +3159,133 @@ function TeacherView({user,state,setState,onLogout}:
                     <td className="px-4 py-3 text-xs text-white/50 capitalize">{rec.category}</td>
                     <td className="px-4 py-3 text-sm font-mono text-white">{currency} {rec.amount.toLocaleString()}</td>
                     <td className="px-4 py-3 text-xs text-white/40">{rec.dueDate}</td>
-                    <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full border font-medium ${rec.status==="paid"?"bg-emerald-500/20 text-emerald-400 border-emerald-500/30":rec.status==="partial"?"bg-yellow-500/20 text-yellow-400 border-yellow-500/30":"bg-red-500/15 text-red-400 border-red-500/20"}`}>{rec.status}</span></td>
+                    <td className="px-4 py-3"><button onClick={()=>{const updated:FeeRecord=rec.status==="paid"?{...rec,status:"unpaid",paidDate:undefined,paidAmount:undefined}:{...rec,status:"paid",paidDate:new Date().toISOString().split("T")[0],paidAmount:rec.amount};db.updateFee(updated);}} className={`text-xs px-2.5 py-1 rounded-full border font-semibold transition-all ${rec.status==="paid"?"bg-emerald-500/20 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/30":rec.status==="partial"?"bg-yellow-500/20 text-yellow-400 border-yellow-500/30 hover:bg-yellow-500/30":"bg-red-500/15 text-red-400 border-red-500/20 hover:bg-red-500/25"}`}>{rec.status==="paid"?"✓ Paid":rec.status==="partial"?"◑ Partial":"✗ Unpaid"}</button></td>
                   </tr>);})}</tbody>
               </table>
             </div>
           </div>
+          {showAddFee&&(
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={e=>e.target===e.currentTarget&&setShowAddFee(false)}>
+              <TeacherAddFeePopup state={state} db={db} setState={setState} scopedStudents={allowedStudents} onClose={()=>setShowAddFee(false)}/>
+            </div>
+          )}
+          </>
         );
       }
 
       // PHASE 2: Counseling — only for is_counselor teachers
       case "counseling": {
         if(!teacher.is_counselor) return <div className="text-white/30 text-sm p-8 text-center">Access denied — Counselor role required.</div>;
-        const [selSt,setSelSt]=React.useState(state.students[0]?.id||"");
-        const [issue,setIssue]=React.useState(""); const [notes,setNotes]=React.useState(""); const [followUp,setFollowUp]=React.useState("");
-        const [mood,setMood]=React.useState<"good"|"neutral"|"concern"|"urgent">("neutral");
-        const profile=state.counseling.profiles.find(p=>p.studentId===selSt);
+
+        // Class+student picker (states declared at top of TeacherView)
+        const couStudents=couClass
+          ? state.students.filter(s=>s.classId===couClass&&s.status!=="pending")
+          : state.students.filter(s=>s.status!=="pending");
+        // couSearch state declared at top of TeacherView
+        const filteredCouStudents=couSearch
+          ? couStudents.filter(s=>s.name.toLowerCase().includes(couSearch.toLowerCase())||s.rollNo.includes(couSearch))
+          : couStudents;
+
+        const activeSt = selSt || filteredCouStudents[0]?.id || "";
+        const profile=state.counseling.profiles.find(p=>p.studentId===activeSt);
         const sessions=profile?.sessions||[];
+        const selStudent=state.students.find(s=>s.id===activeSt);
+        const selStudentClass=selStudent?state.classes.find(c=>c.id===selStudent.classId):null;
+
         return(
           <div className="space-y-5 max-w-2xl">
             <h2 className="text-xl font-bold text-white">Counseling</h2>
-            <select value={selSt} onChange={e=>setSelSt(e.target.value)} className="w-full bg-[#080D18] border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none">{state.students.map(s=><option key={s.id} value={s.id}>{s.name} ({s.rollNo})</option>)}</select>
-            {profile&&<div className="bg-amber-500/5 border border-amber-500/20 rounded-xl px-4 py-3"><p className="text-sm text-white/70">{profile.background||"—"}</p>{profile.flags.length>0&&<div className="flex gap-2 mt-2 flex-wrap">{profile.flags.map(f=><span key={f} className="text-[10px] bg-amber-500/15 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full">{f}</span>)}</div>}</div>}
-            <div className="bg-[#080D18] border border-white/5 rounded-xl p-4 space-y-3">
-              <div className="text-xs font-semibold text-white/40 uppercase tracking-wider">Log New Session</div>
-              <input value={issue} onChange={e=>setIssue(e.target.value)} placeholder="Issue / Topic" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none"/>
-              <textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Session notes…" rows={3} className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none resize-none"/>
-              <input value={followUp} onChange={e=>setFollowUp(e.target.value)} placeholder="Follow-up action" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none"/>
-              <div className="flex gap-2">{(["good","neutral","concern","urgent"] as const).map(m=><button key={m} type="button" onClick={()=>setMood(m)} className={`flex-1 py-2 rounded-lg border text-xs font-medium capitalize transition-all ${mood===m?"border-blue-500/40 bg-blue-600/20 text-blue-300":"border-white/10 text-white/30"}`}>{m}</button>)}</div>
-              <button onClick={()=>{if(!issue||!notes)return;const session={id:`cs${Date.now()}`,date:new Date().toISOString().split("T")[0],issue,notes,followUp,mood};const existing=state.counseling.profiles.find(p=>p.studentId===selSt);const updated={studentId:selSt,background:existing?.background||"",sessions:[...sessions,session],flags:existing?.flags||[]};setState(s=>({...s,counseling:{profiles:s.counseling.profiles.some(p=>p.studentId===selSt)?s.counseling.profiles.map(p=>p.studentId===selSt?updated:p):[...s.counseling.profiles,updated]}}));setIssue("");setNotes("");setFollowUp("");setMood("neutral");}} className="w-full bg-blue-600 hover:bg-blue-500 text-white text-sm py-2.5 rounded-xl transition-colors flex items-center justify-center gap-2"><Save size={14}/>Save Session</button>
+
+            {/* Class filter + student search */}
+            <div className="bg-[#080D18] border border-white/5 rounded-2xl p-4 space-y-3">
+              <div className="text-xs text-white/40 font-semibold uppercase tracking-widest">Select Student</div>
+              <div className="flex gap-2 flex-wrap">
+                <select value={couClass} onChange={e=>{setCouClass(e.target.value);setCouSearch("");setSelSt("");}}
+                  className="bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-3 py-2 outline-none">
+                  <option value="">All Classes</option>
+                  {state.classes.map(cls=><option key={cls.id} value={cls.id}>Class {cls.name}-{cls.section}</option>)}
+                </select>
+                <div className="relative flex-1 min-w-48">
+                  <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30"/>
+                  <input value={couSearch} onChange={e=>setCouSearch(e.target.value)} placeholder="Search by name or roll…"
+                    className="w-full pl-8 bg-white/5 border border-white/10 text-white text-sm rounded-xl px-3 py-2 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+                </div>
+              </div>
+              <div className="max-h-40 overflow-y-auto space-y-1 border border-white/5 rounded-xl p-1.5 bg-black/20">
+                {filteredCouStudents.length===0&&<div className="text-white/20 text-xs text-center py-4">No students found</div>}
+                {filteredCouStudents.map(s=>{
+                  const cls=state.classes.find(cl=>cl.id===s.classId);
+                  return(
+                    <button key={s.id} onClick={()=>setSelSt(s.id)}
+                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-all ${activeSt===s.id?"bg-blue-600/20 border border-blue-500/30":"hover:bg-white/5 border border-transparent"}`}>
+                      <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500/20 to-purple-500/20 flex items-center justify-center text-xs font-bold text-white flex-shrink-0">{s.name[0]}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-white text-xs font-medium truncate">{s.name}</div>
+                        <div className="text-white/30 text-[10px] font-mono">{s.rollNo} · {cls?.name}-{cls?.section}</div>
+                      </div>
+                      {activeSt===s.id&&<Check size={12} className="text-blue-400 flex-shrink-0"/>}
+                    </button>
+                  );
+                })}
+              </div>
+              {selStudent&&(
+                <div className="flex items-center gap-3 bg-blue-500/10 border border-blue-500/20 rounded-xl px-3 py-2">
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500/30 to-purple-500/30 flex items-center justify-center text-sm font-bold text-white">{selStudent.name[0]}</div>
+                  <div><div className="text-white text-sm font-semibold">{selStudent.name}</div>
+                    <div className="text-white/40 text-xs font-mono">{selStudent.rollNo} · Class {selStudentClass?.name}-{selStudentClass?.section}</div>
+                  </div>
+                </div>
+              )}
             </div>
-            {sessions.length>0&&<div className="space-y-3"><div className="text-xs text-white/30 uppercase tracking-wider">Session History</div>{[...sessions].reverse().map(s=><div key={s.id} className="bg-[#080D18] border border-white/5 rounded-xl p-4"><div className="flex items-center justify-between mb-2"><span className="text-xs font-medium text-white/60">{s.issue}</span><span className="text-[10px] text-white/30">{s.date}</span></div><p className="text-sm text-white/50">{s.notes}</p></div>)}</div>}
+
+            {activeSt&&<>
+              {profile&&<div className="bg-amber-500/5 border border-amber-500/20 rounded-xl px-4 py-3">
+                <p className="text-sm text-white/70">{profile.background||"—"}</p>
+                {profile.flags.length>0&&<div className="flex gap-2 mt-2 flex-wrap">{profile.flags.map(f=><span key={f} className="text-[10px] bg-amber-500/15 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full">{f}</span>)}</div>}
+              </div>}
+              <div className="bg-[#080D18] border border-white/5 rounded-xl p-4 space-y-3">
+                <div className="text-xs font-semibold text-white/40 uppercase tracking-wider">Log New Session</div>
+                <input value={issue} onChange={e=>setIssue(e.target.value)} placeholder="Issue / Topic" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none"/>
+                <textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Session notes…" rows={3} className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none resize-none"/>
+                <input value={followUp} onChange={e=>setFollowUp(e.target.value)} placeholder="Follow-up action" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none"/>
+                <div className="flex gap-2">{(["good","neutral","concern","urgent"] as const).map(m=><button key={m} type="button" onClick={()=>setMood(m)} className={`flex-1 py-2 rounded-lg border text-xs font-medium capitalize transition-all ${mood===m?"border-blue-500/40 bg-blue-600/20 text-blue-300":"border-white/10 text-white/30"}`}>{m}</button>)}</div>
+                <button onClick={()=>{
+                  if(!issue||!notes)return;
+                  const session={id:`cs${Date.now()}`,date:new Date().toISOString().split("T")[0],issue,notes,followUp,mood};
+                  const existing=state.counseling.profiles.find(p=>p.studentId===activeSt);
+                  const updated={studentId:activeSt,background:existing?.background||"",sessions:[...sessions,session],flags:existing?.flags||[]};
+                  setState(s=>({...s,counseling:{profiles:s.counseling.profiles.some(p=>p.studentId===activeSt)?s.counseling.profiles.map(p=>p.studentId===activeSt?updated:p):[...s.counseling.profiles,updated]}}));
+                  setIssue("");setNotes("");setFollowUp("");setMood("neutral");
+                }} className="w-full bg-blue-600 hover:bg-blue-500 text-white text-sm py-2.5 rounded-xl transition-colors flex items-center justify-center gap-2"><Save size={14}/>Save Session</button>
+              </div>
+              {sessions.length>0&&(
+                <div className="space-y-3">
+                  <div className="text-xs text-white/30 uppercase tracking-wider">Session History ({sessions.length})</div>
+                  {[...sessions].reverse().map(s=>(
+                    <div key={s.id} className="bg-[#080D18] border border-white/5 rounded-xl p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-medium text-white/60">{s.issue}</span>
+                        <span className="text-[10px] text-white/30">{s.date}</span>
+                      </div>
+                      <p className="text-sm text-white/50">{s.notes}</p>
+                      {s.followUp&&<p className="text-xs text-blue-400/60 mt-1.5">↪ {s.followUp}</p>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>}
           </div>
         );
       }
+      case "inventory":
+        return <InventoryModule state={state} setState={setState} db={db} teacherId={teacher.id}/>;
 
       default: return null;
     }
   }
 
   return(
-    <Layout user={user} state={state} navItems={NAV} activeTab={tab} setTab={setTab} onLogout={onLogout}>
+    <Layout user={user} state={state} navItems={NAV} activeTab={tab} setTab={setTab} onLogout={onLogout} onBackToSite={onBackToSite}>
       {renderTab()}
       {editSt&&<div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"><StudentProfileModal student={editSt} state={state} onSave={u=>{setState(s=>({...s,students:s.students.map(x=>x.id===u.id?u:x)}));try{sb.update("students",u.id,{name:u.name,roll_no:u.rollNo,class_id:u.classId,photo:u.photo??null,profile:u.profile??null});}catch{}}} onClose={()=>setEditSt(null)}/></div>}
       {editSelf&&<div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"><TeacherProfileModal teacher={teacher} state={state} onSave={u=>{setState(s=>({...s,teachers:s.teachers.map(x=>x.id===u.id?u:x)}));try{sb.update("teachers",u.id,{name:u.name,email:u.email,photo:u.photo??null,profile:u.profile??null});}catch{}}} onClose={()=>setEditSelf(false)}/></div>}
@@ -2370,8 +3293,8 @@ function TeacherView({user,state,setState,onLogout}:
   );
 }
 // ═══════════════════════════════════════════════════════════════════════════════
-function StudentView({user,state,setState,onLogout}:
-  {user:LoggedInUser;state:AppState;setState:(fn:(s:AppState)=>AppState)=>void;onLogout:()=>void}) {
+function StudentView({user,state,setState,onLogout,onBackToSite}:
+  {user:LoggedInUser;state:AppState;setState:(fn:(s:AppState)=>AppState)=>void;onLogout:()=>void;onBackToSite?:()=>void}) {
 
   const [tab,setTab]     = useState("dashboard");
   const [editSelf,setEditSelf] = useState(false);
@@ -2569,7 +3492,7 @@ function StudentView({user,state,setState,onLogout}:
   }
 
   return(
-    <Layout user={user} state={state} navItems={NAV} activeTab={tab} setTab={setTab} onLogout={onLogout}>
+    <Layout user={user} state={state} navItems={NAV} activeTab={tab} setTab={setTab} onLogout={onLogout} onBackToSite={onBackToSite}>
       {renderTab()}
       {editSelf&&<div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"><StudentProfileModal student={student} state={state} onSave={u=>{setState(s=>({...s,students:s.students.map(x=>x.id===u.id?u:x)}));try{sb.update("students",u.id,{name:u.name,roll_no:u.rollNo,class_id:u.classId,photo:u.photo??null,profile:u.profile??null});}catch{}}} onClose={()=>setEditSelf(false)}/></div>}
     </Layout>
@@ -2834,6 +3757,122 @@ function CounselingInner({state,setState,db}:{state:AppState;setState:(fn:(s:App
 // FEES & FINANCE MODULE
 // ═══════════════════════════════════════════════════════════════════════════════
 // PHASE 4: Searchable student picker for fee records
+
+// ─── EXAMS MANAGER (Admin) ────────────────────────────────────────────────────
+function ExamsManager({state,setState}:{state:AppState;setState:(fn:(s:AppState)=>AppState)=>void}){
+  const [year,setYear]=React.useState(new Date().getFullYear());
+  const [examName,setExamName]=React.useState("");
+  const [selExam,setSelExam]=React.useState<string>("");
+  const [selClass,setSelClass]=React.useState(state.classes[0]?.id||"");
+  const [selSubject,setSelSubject]=React.useState("");
+  const [marks,setMarks]=React.useState<Record<string,string>>({});
+  const [saved,setSaved]=React.useState(false);
+  const years=[...new Set([...state.exams.map(e=>e.year),new Date().getFullYear(),new Date().getFullYear()+1])].sort((a,b)=>b-a);
+  const subjectsForClass=state.subjects.filter(s=>s.classIds.includes(selClass));
+  const studentsForClass=state.students.filter(s=>s.classId===selClass&&s.status!=="pending");
+  const existingRecords=React.useMemo(()=>{
+    if(!selExam||!selSubject) return {};
+    const rec:Record<string,number>={};
+    state.examRecords.filter(r=>r.examId===selExam&&r.subjectId===selSubject&&studentsForClass.some(s=>s.id===r.studentId)).forEach(r=>{rec[r.studentId]=r.marks;});
+    return rec;
+  },[selExam,selClass,selSubject,state.examRecords]);
+  function createExam(){
+    if(!examName.trim())return;
+    const id=uid();
+    const exam:Exam={id,year,name:examName.trim(),createdAt:new Date().toISOString().split("T")[0]};
+    setState(s=>({...s,exams:[...s.exams,exam]}));
+    setExamName("");setSelExam(id);
+  }
+  function saveMarks(){
+    if(!selExam||!selSubject)return;
+    const newRecs:ExamRecord[]=[];
+    Object.entries(marks).forEach(([studentId,v])=>{const n=parseFloat(v);if(isNaN(n))return;newRecs.push({id:uid(),examId:selExam,studentId,subjectId:selSubject,marks:n});});
+    setState(s=>({...s,examRecords:[...s.examRecords.filter(r=>!(r.examId===selExam&&r.subjectId===selSubject&&studentsForClass.some(st=>st.id===r.studentId))),...newRecs]}));
+    setMarks({});setSaved(true);setTimeout(()=>setSaved(false),2000);
+  }
+  return(
+    <div className="space-y-6">
+      <h2 className="text-xl font-bold text-white">Exams & Historical Records</h2>
+      {/* Create Exam */}
+      <div className="bg-[#080D18] border border-white/5 rounded-2xl p-5 space-y-4">
+        <h3 className="text-white/50 text-xs font-semibold uppercase tracking-widest">Create New Exam</h3>
+        <div className="flex gap-3 flex-wrap items-end">
+          <div><label className="text-xs text-white/40 uppercase block mb-1.5">Year</label>
+            <input type="number" value={year} onChange={e=>setYear(Number(e.target.value))} min="2000" max="2099" className="w-24 bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-3 py-2.5 outline-none focus:border-blue-500/50 font-mono" placeholder="2026"/>
+          </div>
+          <div className="flex-1 min-w-48"><label className="text-xs text-white/40 uppercase block mb-1.5">Exam Name</label>
+            <input value={examName} onChange={e=>setExamName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&createExam()} placeholder="e.g. 1st Term Test, Annual Exam…" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+          </div>
+          <button onClick={createExam} disabled={!examName.trim()} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-sm px-4 py-2.5 rounded-xl flex items-center gap-2 font-medium"><Plus size={14}/>Create</button>
+        </div>
+      </div>
+      {/* All Exams */}
+      {state.exams.length>0&&(
+        <div className="bg-[#080D18] border border-white/5 rounded-2xl p-5 space-y-3">
+          <h3 className="text-white/50 text-xs font-semibold uppercase tracking-widest">All Exams — click to enter marks</h3>
+          <div className="space-y-3">
+            {[...new Set(state.exams.map(e=>e.year))].sort((a,b)=>b-a).map(y=>(
+              <div key={y}>
+                <div className="text-xs text-white/30 font-semibold mb-1.5">{y}</div>
+                <div className="flex gap-1.5 flex-wrap">
+                  {state.exams.filter(e=>e.year===y).map(ex=>(
+                    <button key={ex.id} onClick={()=>setSelExam(selExam===ex.id?"":ex.id)} className={`text-xs px-3 py-1.5 rounded-lg border transition-all ${selExam===ex.id?"bg-blue-600/20 border-blue-500/40 text-blue-300":"border-white/10 text-white/50 hover:border-white/20 hover:text-white/70"}`}>
+                      {ex.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {/* Enter Marks */}
+      {selExam&&(
+        <div className="bg-[#080D18] border border-white/5 rounded-2xl p-5 space-y-4">
+          <div><h3 className="text-white font-semibold">{state.exams.find(e=>e.id===selExam)?.name} — {state.exams.find(e=>e.id===selExam)?.year}</h3>
+            <p className="text-white/30 text-xs mt-0.5">Enter marks per class+subject. Old exam records are never deleted.</p>
+          </div>
+          <div className="flex gap-3 flex-wrap">
+            <select value={selClass} onChange={e=>{setSelClass(e.target.value);setSelSubject("");setMarks({});}} className="bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-3 py-2.5 outline-none">
+              {state.classes.map(c=><option key={c.id} value={c.id}>Class {c.name}-{c.section}</option>)}
+            </select>
+            <select value={selSubject} onChange={e=>{setSelSubject(e.target.value);setMarks({});}} className="bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-3 py-2.5 outline-none">
+              <option value="">— Select Subject —</option>
+              {subjectsForClass.map(s=><option key={s.id} value={s.id}>{s.name} ({s.code})</option>)}
+            </select>
+          </div>
+          {selSubject&&(
+            <>
+              <div className="bg-black/20 rounded-xl overflow-hidden overflow-x-auto">
+                <table className="w-full">
+                  <thead><tr className="border-b border-white/5">{["Student","Roll No","Previous","Enter /100"].map(h=><th key={h} className="text-left text-xs text-white/40 uppercase px-4 py-3">{h}</th>)}</tr></thead>
+                  <tbody>{studentsForClass.map(st=>{
+                    const prev=existingRecords[st.id];
+                    return(<tr key={st.id} className="border-b border-white/5 hover:bg-white/3">
+                      <td className="px-4 py-3"><div className="flex items-center gap-2"><div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500/20 to-purple-500/20 flex items-center justify-center text-xs font-bold text-white">{st.name[0]}</div><span className="text-sm text-white">{st.name}</span></div></td>
+                      <td className="px-4 py-3 font-mono text-xs text-white/40">{st.rollNo}</td>
+                      <td className="px-4 py-3">{prev!==undefined?<span className={`font-mono text-sm ${prev>=75?"text-emerald-400":prev>=40?"text-yellow-400":"text-red-400"}`}>{prev}</span>:<span className="text-white/20 text-xs">—</span>}</td>
+                      <td className="px-4 py-3"><input type="number" min="0" max="100" placeholder={prev!==undefined?String(prev):"0–100"} value={marks[st.id]??""} onChange={e=>setMarks(m=>({...m,[st.id]:e.target.value}))} className="w-24 bg-white/5 border border-white/10 text-white text-sm rounded-lg px-3 py-1.5 font-mono outline-none focus:border-blue-500/50"/></td>
+                    </tr>);
+                  })}</tbody>
+                </table>
+              </div>
+              <button onClick={saveMarks} className={`flex items-center gap-2 text-sm px-4 py-2.5 rounded-xl font-medium transition-all ${saved?"bg-emerald-500/20 text-emerald-400 border border-emerald-500/30":"bg-emerald-600 hover:bg-emerald-500 text-white"}`}>
+                <Save size={14}/>{saved?"Saved ✓":"Save Marks"}
+              </button>
+            </>
+          )}
+        </div>
+      )}
+      {state.examRecords.length>0&&(
+        <div className="bg-[#080D18] border border-white/5 rounded-2xl p-4">
+          <p className="text-white/30 text-xs">{state.examRecords.length} total exam records stored across {[...new Set(state.examRecords.map(r=>r.examId))].length} exams. View historical results in the Result Ledger → Exam Records tab.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function FeeStudentPicker({students,onChange}:{students:Student[];onChange:(id:string)=>void}){
   const [q,setQ]=useState('');
   const filtered=students.filter(s=>!q||s.name.toLowerCase().includes(q.toLowerCase())||s.rollNo.includes(q));
@@ -2995,12 +4034,14 @@ function FeesInner({state,setState,db}:{state:AppState;setState:(fn:(s:AppState)
 // ═══════════════════════════════════════════════════════════════════════════════
 // INVENTORY MODULE
 // ═══════════════════════════════════════════════════════════════════════════════
-function InventoryModule({state,setState,db}:{state:AppState;setState:(fn:(s:AppState)=>AppState)=>void;db:DbOps}){
-  return <InventoryInner state={state} setState={setState} db={db}/>;
+function InventoryModule({state,setState,db,teacherId}:{state:AppState;setState:(fn:(s:AppState)=>AppState)=>void;db:DbOps;teacherId?:string}){
+  return <InventoryInner state={state} setState={setState} db={db} teacherId={teacherId}/>;
 }
 
-function InventoryInner({state,setState,db}:{state:AppState;setState:(fn:(s:AppState)=>AppState)=>void;db:DbOps}){
+function InventoryInner({state,setState,db,teacherId}:{state:AppState;setState:(fn:(s:AppState)=>AppState)=>void;db:DbOps;teacherId?:string}){
   const upd=(fn:(inv:InventoryState)=>InventoryState)=>setState(s=>({...s,inventory:fn(s.inventory)}));
+  const isTeacherView=!!teacherId;
+  const visibleLabs=isTeacherView?state.inventory.labs.filter(l=>l.assignedTeacherId===teacherId):state.inventory.labs;
   // "general" = show all non-lab items; labId = show specific lab (teacher view)
   const [view,setView]=React.useState<"general"|string>("general");
   const [unlockedLabs,setUnlockedLabs]=React.useState<Set<string>>(new Set());
@@ -3010,7 +4051,7 @@ function InventoryInner({state,setState,db}:{state:AppState;setState:(fn:(s:AppS
   const [catFilter,setCatFilter]=React.useState("all");
   const [condFilter,setCondFilter]=React.useState<ItemCondition|"all">("all");
   const [popup,setPopup]=React.useState<{type:string;data?:any}|null>(null);
-  const isAdmin=true; // inside PasswordGate so always authorized staff
+  const isAdmin=!isTeacherView;
 
   const COND_CFG:Record<ItemCondition,{label:string;color:string}>={
     excellent:{label:"Excellent",color:"bg-emerald-500/20 text-emerald-400 border-emerald-500/30"},
@@ -3020,7 +4061,7 @@ function InventoryInner({state,setState,db}:{state:AppState;setState:(fn:(s:AppS
     damaged:  {label:"Damaged",  color:"bg-red-500/20 text-red-400 border-red-500/30"},
   };
 
-  const labs=state.inventory.labs;
+  const labs=visibleLabs; // filtered for teacher view
   const allItems=state.inventory.items;
 
   // Items shown in current view
@@ -3179,7 +4220,7 @@ function InventoryInner({state,setState,db}:{state:AppState;setState:(fn:(s:AppS
             <InventoryItemForm initial={popup.data} labId={view==="general"?undefined:view} labs={labs} onSave={saveItem} onClose={()=>setPopup(null)} condCfg={COND_CFG}/>
           )}
           {(popup.type==="addLab"||popup.type==="editLab")&&(
-            <LabForm initial={popup.data} onSave={(lab:any)=>{
+            <LabForm initial={popup.data} teachers={state.teachers} onSave={(lab:any)=>{
               if(lab.id) db.updateLab(lab);
               else saveLab(lab);
               setPopup(null);
@@ -3207,10 +4248,10 @@ function InventoryInner({state,setState,db}:{state:AppState;setState:(fn:(s:AppS
   );
 }
 
-function LabForm({initial,onSave,onClose}:{initial?:Lab;onSave:(l:any)=>void;onClose:()=>void}){
+function LabForm({initial,onSave,onClose,teachers}:{initial?:Lab;onSave:(l:any)=>void;onClose:()=>void;teachers?:{id:string;name:string}[]}){
   const COLORS=["bg-blue-500/10 border-blue-500/20","bg-cyan-500/10 border-cyan-500/20","bg-emerald-500/10 border-emerald-500/20","bg-purple-500/10 border-purple-500/20","bg-amber-500/10 border-amber-500/20","bg-red-500/10 border-red-500/20"];
   const ICONS=["⚗️","💻","🔬","🧪","🔭","📡","🧬","⚡","🤖","🛠️","📐","🏋️"];
-  const [form,setForm]=React.useState({name:initial?.name||"",icon:initial?.icon||"⚗️",description:initial?.description||"",password:initial?.password||"",color:initial?.color||COLORS[0]});
+  const [form,setForm]=React.useState({name:initial?.name||"",icon:initial?.icon||"⚗️",description:initial?.description||"",password:initial?.password||"",color:initial?.color||COLORS[0],assignedTeacherId:initial?.assignedTeacherId||""});
   const set=(k:keyof typeof form)=>(v:string)=>setForm(f=>({...f,[k]:v}));
   const [showPw,setShowPw]=React.useState(false);
   return(
@@ -3232,6 +4273,14 @@ function LabForm({initial,onSave,onClose}:{initial?:Lab;onSave:(l:any)=>void;onC
         <label className="text-xs text-white/40 uppercase block mb-1.5">Lab Access Password *</label>
         <div className="relative"><input type={showPw?"text":"password"} value={form.password} onChange={e=>set("password")(e.target.value)} placeholder="Set a unique password for this lab" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 pr-10 outline-none focus:border-amber-500/50 placeholder-white/20"/><button type="button" onClick={()=>setShowPw(s=>!s)} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60">{showPw?<EyeOff size={14}/>:<Eye size={14}/>}</button></div>
         <p className="text-white/20 text-[10px] mt-1">Teachers need this password to access the lab inventory.</p>
+      </div>
+      <div>
+        <label className="text-xs text-white/40 uppercase block mb-1.5">Assigned Lab Teacher <span className="text-white/20">(optional)</span></label>
+        <select value={form.assignedTeacherId} onChange={e=>setForm(f=>({...f,assignedTeacherId:e.target.value}))} className="w-full bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50">
+          <option value="">— No assigned teacher —</option>
+          {(teachers||[]).map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+        <p className="text-white/20 text-[10px] mt-1">This teacher will see this lab in their Teacher Dashboard.</p>
       </div>
       <button onClick={()=>{if(!form.name||!form.password)return;onSave(initial?{...form,id:initial.id}:form);}} className="w-full bg-blue-600 hover:bg-blue-500 text-white text-sm py-3 rounded-xl flex items-center justify-center gap-2 font-medium"><Save size={14}/>{initial?"Update Lab":"Create Lab"}</button>
     </div>
@@ -3793,131 +4842,165 @@ function StaffManager({state,setState}:{state:AppState;setState:(fn:(s:AppState)
 // ═══════════════════════════════════════════════════════════════════════════════
 function DownloadsManager({state,setState}:{state:AppState;setState:(fn:(s:AppState)=>AppState)=>void}){
   const upd=(fn:(c:CMS)=>CMS)=>setState(s=>({...s,cms:fn(s.cms)}));
-  const media=state.cms.media;
+  const today=new Date().toISOString().split("T")[0];
+  const cats=state.cms.downloadCategories||[];
 
-  const [mode,setMode]       = useState<"url"|"upload">("upload");
-  const [urlInput,setUrl]    = useState("");
-  const [fileName,setFName]  = useState("");
-  const [fileType,setFType]  = useState<"image"|"pdf">("pdf");
-  const [filter,setFilter]   = useState<"all"|"image"|"pdf">("all");
-  const [msg,setMsg]         = useState("");
+  // ── Category Manager ──
+  const [newCatName,setNewCatName]=useState("");
+  const [newCatIcon,setNewCatIcon]=useState("📄");
 
+  // ── Upload state ──
+  const [mode,setMode]=useState<"url"|"upload">("upload");
+  const [urlInput,setUrl]=useState("");
+  const [fileName,setFName]=useState("");
+  const [fileType,setFType]=useState<"image"|"pdf">("pdf");
+  const [selCatId,setSelCatId]=useState("");
+  const [selClassId,setSelClassId]=useState("");
+  const [selSubjectId,setSelSubjectId]=useState("");
+  const [filter,setFilter]=useState("all");
+  const [msg,setMsg]=useState("");
+
+  function addCat(){
+    if(!newCatName.trim())return;
+    const id=uid();
+    upd(c=>({...c,downloadCategories:[...c.downloadCategories,{id,name:newCatName.trim(),icon:newCatIcon}]}));
+    setNewCatName("");
+  }
+  function delCat(id:string){
+    upd(c=>({...c,downloadCategories:c.downloadCategories.filter(x=>x.id!==id),
+      media:c.media.map(m=>m.category===id?{...m,category:undefined}:m)}));
+  }
   function addFromUrl(){
-    if(!urlInput.trim()||!fileName.trim()){setMsg("Please provide both a file name and URL.");return;}
-    upd(c=>({...c,media:[...c.media,{id:uid(),name:fileName.trim(),url:urlInput.trim(),type:fileType,size:"—",uploadedAt:today}]}));
-    setUrl("");setFName("");setMsg("✓ File added.");setTimeout(()=>setMsg(""),3000);
+    if(!urlInput.trim()||!fileName.trim())return;
+    const clsObj=state.classes.find(x=>x.id===selClassId);
+    const subObj=state.subjects.find(x=>x.id===selSubjectId);
+    upd(c=>({...c,media:[...c.media,{id:uid(),name:fileName.trim(),url:urlInput.trim(),type:fileType,size:"—",uploadedAt:today,category:selCatId||undefined,classId:selClassId||undefined,subjectId:selSubjectId||undefined,className:clsObj?`${clsObj.name}-${clsObj.section}`:undefined,subjectName:subObj?.name}]}));
+    setUrl("");setFName("");setMsg("Added!");setTimeout(()=>setMsg(""),2000);
+  }
+  function addFromFile(f:File,url:string){
+    const t=f.type.includes("pdf")?"pdf":"image";
+    const clsObj2=state.classes.find(x=>x.id===selClassId);
+    const subObj2=state.subjects.find(x=>x.id===selSubjectId);
+    upd(c=>({...c,media:[...c.media,{id:uid(),name:f.name,url,type:t as any,size:`${(f.size/1024).toFixed(1)} KB`,uploadedAt:today,category:selCatId||undefined,classId:selClassId||undefined,subjectId:selSubjectId||undefined,className:clsObj2?`${clsObj2.name}-${clsObj2.section}`:undefined,subjectName:subObj2?.name}]}));
+    setMsg("Uploaded!");setTimeout(()=>setMsg(""),2000);
   }
 
-  function remove(id:string){upd(c=>({...c,media:c.media.filter(x=>x.id!==id)}));}
-
-  const shown=filter==="all"?media:media.filter(m=>m.type===filter);
+  const filtered=state.cms.media.filter(m=>filter==="all"||(m.category===filter));
+  const subjectsForClass=selClassId?state.subjects.filter(s=>s.classIds.includes(selClassId)):state.subjects;
 
   return(
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div><h2 className="text-xl font-bold text-white">Manage Downloads</h2><p className="text-white/30 text-xs mt-0.5">Upload or link PDFs, past papers, circulars, and images for the public Downloads page.</p></div>
-        <div className="text-xs text-white/30 bg-white/5 border border-white/10 px-3 py-1.5 rounded-full">{media.length} files</div>
+      {/* Category Manager */}
+      <div className="bg-[#080D18] border border-white/5 rounded-2xl p-5 space-y-4">
+        <h3 className="text-white/50 text-xs font-semibold uppercase tracking-widest">Download Categories</h3>
+        <div className="flex gap-2 flex-wrap">
+          {cats.map(cat=>(
+            <div key={cat.id} className="flex items-center gap-1.5 bg-white/5 border border-white/10 rounded-xl px-3 py-1.5 text-sm text-white">
+              <span>{cat.icon}</span><span>{cat.name}</span>
+              <button onClick={()=>delCat(cat.id)} className="text-white/20 hover:text-red-400 ml-1"><X size={11}/></button>
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-2 items-end">
+          <div><label className="text-xs text-white/40 block mb-1">Icon</label>
+            <input value={newCatIcon} onChange={e=>setNewCatIcon(e.target.value)} className="w-14 text-center bg-white/5 border border-white/10 text-white text-lg rounded-xl px-2 py-2 outline-none" maxLength={2}/>
+          </div>
+          <div className="flex-1"><label className="text-xs text-white/40 block mb-1">Category Name</label>
+            <input value={newCatName} onChange={e=>setNewCatName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addCat()} placeholder="e.g. Past Papers, Homework…" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+          </div>
+          <button onClick={addCat} disabled={!newCatName.trim()} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-sm px-4 py-2.5 rounded-xl flex items-center gap-2"><Plus size={14}/>Add</button>
+        </div>
       </div>
 
-      {/* Add File Form */}
+      {/* Upload File */}
       <div className="bg-[#080D18] border border-white/5 rounded-2xl p-5 space-y-4">
-        <div className="flex gap-2 mb-1">
-          <button onClick={()=>setMode("upload")} className={`text-xs px-3 py-1.5 rounded-lg border transition-all ${mode==="upload"?"bg-blue-600 border-blue-500 text-white":"border-white/10 text-white/40 hover:text-white/70"}`}><Upload size={11} className="inline mr-1"/>Upload File</button>
-          <button onClick={()=>setMode("url")} className={`text-xs px-3 py-1.5 rounded-lg border transition-all ${mode==="url"?"bg-blue-600 border-blue-500 text-white":"border-white/10 text-white/40 hover:text-white/70"}`}><Globe size={11} className="inline mr-1"/>Link by URL</button>
+        <h3 className="text-white/50 text-xs font-semibold uppercase tracking-widest">Upload File</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div><label className="text-xs text-white/40 block mb-1">Category</label>
+            <select value={selCatId} onChange={e=>setSelCatId(e.target.value)} className="w-full bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-3 py-2.5 outline-none">
+              <option value="">— No Category —</option>
+              {cats.map(cat=><option key={cat.id} value={cat.id}>{cat.icon} {cat.name}</option>)}
+            </select>
+          </div>
+          <div><label className="text-xs text-white/40 block mb-1">Class (optional)</label>
+            <select value={selClassId} onChange={e=>{setSelClassId(e.target.value);setSelSubjectId("");}} className="w-full bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-3 py-2.5 outline-none">
+              <option value="">All Classes</option>
+              {state.classes.map(cls=><option key={cls.id} value={cls.id}>Class {cls.name}-{cls.section}</option>)}
+            </select>
+          </div>
+          <div><label className="text-xs text-white/40 block mb-1">Subject (optional)</label>
+            <select value={selSubjectId} onChange={e=>setSelSubjectId(e.target.value)} className="w-full bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-3 py-2.5 outline-none">
+              <option value="">All Subjects</option>
+              {subjectsForClass.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </div>
         </div>
-
+        <div className="flex gap-2 p-1 bg-white/5 rounded-xl w-fit mb-2">
+          <button onClick={()=>setMode("upload")} className={`text-xs px-4 py-1.5 rounded-lg transition-all ${mode==="upload"?"bg-blue-600 text-white":"text-white/40"}`}>Upload File</button>
+          <button onClick={()=>setMode("url")} className={`text-xs px-4 py-1.5 rounded-lg transition-all ${mode==="url"?"bg-blue-600 text-white":"text-white/40"}`}>Add URL</button>
+        </div>
         {mode==="upload"?(
-          <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-white/10 rounded-xl cursor-pointer hover:border-blue-500/40 hover:bg-blue-500/5 transition-all group">
-            <Upload size={22} className="text-white/20 group-hover:text-blue-400 mb-2 transition-colors"/>
-            <span className="text-sm text-white/40 group-hover:text-white/60">Click to upload — PDF, Image, or any file</span>
-            <span className="text-xs text-white/20 mt-1">File will appear in the public Downloads page</span>
-            <input type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" className="hidden" onChange={e=>{
-              const f=e.target.files?.[0]; if(!f) return;
-              const r=new FileReader();
-              r.onload=ev=>{
-                const url=ev.target?.result as string;
-                const t=f.type.includes("pdf")?"pdf":"image";
-                upd(c=>({...c,media:[...c.media,{id:uid(),name:f.name,url,type:t,size:`${(f.size/1024).toFixed(1)} KB`,uploadedAt:today}]}));
-                setMsg(`✓ "${f.name}" uploaded.`); setTimeout(()=>setMsg(""),3000);
-              };
-              r.readAsDataURL(f); e.target.value="";
-            }}/>
+          <label className="flex items-center gap-3 border-2 border-dashed border-white/10 hover:border-blue-500/30 rounded-xl p-6 cursor-pointer transition-colors group">
+            <Upload size={20} className="text-white/20 group-hover:text-blue-400"/>
+            <span className="text-white/30 text-sm group-hover:text-white/50">Click to upload PDF or image</span>
+            <input type="file" accept="image/*,.pdf" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(!f)return;const r=new FileReader();r.onload=ev=>{addFromFile(f,ev.target?.result as string);};r.readAsDataURL(f);e.target.value="";}}/>
           </label>
         ):(
-          <div className="space-y-3">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-white/40 uppercase tracking-wider block mb-1.5">Display Name *</label>
-                <input value={fileName} onChange={e=>setFName(e.target.value)} placeholder="e.g. Grade 10 Maths Past Paper 2024"
-                  className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
-              </div>
-              <div>
-                <label className="text-xs text-white/40 uppercase tracking-wider block mb-1.5">File Type</label>
-                <select value={fileType} onChange={e=>setFType(e.target.value as "image"|"pdf")}
-                  className="w-full bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50">
-                  <option value="pdf">PDF / Document</option>
-                  <option value="image">Image</option>
-                </select>
-              </div>
+          <div className="space-y-2">
+            <input value={fileName} onChange={e=>setFName(e.target.value)} placeholder="Display name" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+            <div className="flex gap-2">
+              <input value={urlInput} onChange={e=>setUrl(e.target.value)} placeholder="https://…" className="flex-1 bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+              <select value={fileType} onChange={e=>setFType(e.target.value as any)} className="bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-3 py-2.5 outline-none">
+                <option value="pdf">PDF</option><option value="image">Image</option>
+              </select>
+              <button onClick={addFromUrl} disabled={!urlInput.trim()||!fileName.trim()} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-sm px-4 py-2.5 rounded-xl"><Plus size={14}/></button>
             </div>
-            <div>
-              <label className="text-xs text-white/40 uppercase tracking-wider block mb-1.5">Direct URL *</label>
-              <input value={urlInput} onChange={e=>setUrl(e.target.value)} placeholder="https://drive.google.com/… or any direct link"
-                className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
-            </div>
-            <button onClick={addFromUrl} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-sm px-5 py-2.5 rounded-xl transition-colors font-medium"><Plus size={14}/>Add Link</button>
           </div>
         )}
-
-        {msg&&<div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-2.5 text-xs text-emerald-400"><CheckCircle size={12}/>{msg}</div>}
+        {msg&&<p className="text-emerald-400 text-xs">{msg}</p>}
       </div>
 
-      {/* File List */}
-      <div>
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold text-white/60">Uploaded Files</h3>
-          <div className="flex gap-2">
-            {(["all","pdf","image"] as const).map(f=>(
-              <button key={f} onClick={()=>setFilter(f)} className={`text-xs px-3 py-1.5 rounded-lg border transition-all ${filter===f?"bg-white/10 border-white/20 text-white":"border-white/5 text-white/30 hover:text-white/60"}`}>
-                {f==="all"?"All":f==="pdf"?"PDFs":"Images"}
-              </button>
-            ))}
+      {/* Files list */}
+      <div className="bg-[#080D18] border border-white/5 rounded-2xl p-5 space-y-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          <h3 className="text-white/50 text-xs font-semibold uppercase tracking-widest flex-1">Files ({state.cms.media.length})</h3>
+          <div className="flex gap-1 flex-wrap">
+            <button onClick={()=>setFilter("all")} className={`text-xs px-3 py-1 rounded-lg ${filter==="all"?"bg-white/10 text-white":"text-white/30 hover:text-white/50"}`}>All</button>
+            {cats.map(cat=><button key={cat.id} onClick={()=>setFilter(cat.id)} className={`text-xs px-3 py-1 rounded-lg ${filter===cat.id?"bg-white/10 text-white":"text-white/30 hover:text-white/50"}`}>{cat.icon} {cat.name}</button>)}
           </div>
         </div>
-
-        {shown.length===0?(
-          <div className="text-center py-16 bg-[#080D18] border border-dashed border-white/10 rounded-xl text-white/20 text-sm">
-            <FileText size={32} className="mx-auto mb-3 opacity-30"/>No files yet. Upload above or add a URL link.
-          </div>
+        {filtered.length===0?(
+          <p className="text-white/20 text-sm py-4 text-center">No files {filter!=="all"?"in this category":""} yet</p>
         ):(
           <div className="space-y-2">
-            {shown.map(m=>(
-              <div key={m.id} className="flex items-center gap-4 bg-[#080D18] border border-white/5 rounded-xl px-4 py-3 hover:border-white/10 transition-colors group">
-                <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${m.type==="pdf"?"bg-red-500/10":"bg-blue-500/10"}`}>
-                  {m.type==="pdf"?<FileText size={16} className="text-red-400"/>:<Image size={16} className="text-blue-400"/>}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-white text-sm truncate">{m.name}</div>
-                  <div className="flex items-center gap-3 mt-0.5">
-                    <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${m.type==="pdf"?"bg-red-500/10 text-red-400":"bg-blue-500/10 text-blue-400"}`}>{m.type.toUpperCase()}</span>
-                    <span className="text-white/25 text-xs font-mono">{m.size}</span>
-                    <span className="text-white/25 text-xs">{m.uploadedAt}</span>
+            {filtered.map(m=>{
+              const cat=cats.find(x=>x.id===m.category);
+              const cls=state.classes.find(x=>x.id===m.classId);
+              const sub=state.subjects.find(x=>x.id===m.subjectId);
+              return(
+                <div key={m.id} className="flex items-center gap-3 bg-white/3 border border-white/5 rounded-xl px-4 py-3">
+                  <div className="text-xl flex-shrink-0">{m.type==="pdf"?"📄":"🖼️"}</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-white text-sm font-medium truncate">{m.name}</div>
+                    <div className="flex gap-2 flex-wrap mt-0.5">
+                      {cat&&<span className="text-[10px] text-white/40">{cat.icon} {cat.name}</span>}
+                      {cls&&<span className="text-[10px] text-blue-300/60">Class {cls.name}-{cls.section}</span>}
+                      {sub&&<span className="text-[10px] text-purple-300/60">{sub.name}</span>}
+                      <span className="text-[10px] text-white/20">{m.uploadedAt}</span>
+                    </div>
                   </div>
+                  <a href={m.url} target="_blank" rel="noopener noreferrer" className="text-white/20 hover:text-blue-400"><ExternalLink size={13}/></a>
+                  <button onClick={()=>upd(c=>({...c,media:c.media.filter(x=>x.id!==m.id)}))} className="text-white/20 hover:text-red-400"><Trash2 size={13}/></button>
                 </div>
-                <a href={m.url} target="_blank" rel="noopener noreferrer" className="w-8 h-8 rounded-lg border border-white/10 hover:border-blue-500/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all">
-                  <ExternalLink size={12} className="text-white/40 hover:text-blue-400"/>
-                </a>
-                <button onClick={()=>remove(m.id)} className="w-8 h-8 rounded-lg border border-white/10 hover:border-red-500/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all">
-                  <Trash2 size={12} className="text-white/40 hover:text-red-400"/>
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
     </div>
   );
 }
+
 
 function CMSAdmin({state,setState}:{state:AppState;setState:(fn:(s:AppState)=>AppState)=>void}){
   const [section,setSection]=useState("slides");
@@ -4123,32 +5206,79 @@ function CMSAdmin({state,setState}:{state:AppState;setState:(fn:(s:AppState)=>Ap
 
     if(popup.type==="addSlide"||popup.type==="editSlide"){
       let img=data?.imageUrl||"",title=data?.title||"",sub=data?.subtitle||"";
+      const previewImg=data?.imageUrl||"";
       return(
         <Modal title={isEdit?"Edit Slide":"Add Slide"} onClose={close}>
           <div><label className="text-xs text-white/40 uppercase block mb-1.5">Slide Image</label>
-            <div className="relative"><img src={img||"https://images.unsplash.com/photo-1580582932707-520aed937b7b?w=400&q=60"} className="w-full h-28 object-cover rounded-xl mb-2"/><label className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-xl cursor-pointer opacity-0 hover:opacity-100 transition-opacity"><Upload size={20} className="text-white"/><input type="file" accept="image/*" className="hidden" onChange={imgUpload(url=>{img=url;})}/></label></div>
-            <input value={img} onChange={e=>{img=e.target.value;}} placeholder="...or paste image URL" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-3 py-2 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+            <div className="relative rounded-xl overflow-hidden mb-2 bg-white/5 border border-white/10" style={{height:"160px"}}>
+              {previewImg
+                ? <img src={previewImg} className="w-full h-full object-cover"/>
+                : <div className="w-full h-full flex flex-col items-center justify-center text-white/20"><Image size={28}/><span className="text-xs mt-2">No image selected</span></div>
+              }
+              <label className="absolute inset-0 flex items-center justify-center bg-black/50 cursor-pointer opacity-0 hover:opacity-100 transition-opacity">
+                <div className="flex flex-col items-center gap-1"><Upload size={22} className="text-white"/><span className="text-white text-xs font-medium">Upload Image</span></div>
+                <input type="file" accept="image/*" className="hidden" onChange={e=>{
+                  const f=e.target.files?.[0]; if(!f) return;
+                  const r=new FileReader();
+                  r.onload=ev=>{
+                    const url=ev.target?.result as string;
+                    img=url;
+                    setPopup(p=>p?{...p,data:{...p.data,imageUrl:url}}:p);
+                  };
+                  r.readAsDataURL(f);
+                  e.target.value="";
+                }}/>
+              </label>
+            </div>
+            <input value={previewImg} onChange={e=>{img=e.target.value; setPopup(p=>p?{...p,data:{...p.data,imageUrl:e.target.value}}:p);}} placeholder="...or paste image URL" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-3 py-2 outline-none focus:border-blue-500/50 placeholder-white/20"/>
           </div>
-          <Field label="Title" onChange={v=>{title=v;}} type="text"/>
-          <Field label="Subtitle" onChange={v=>{sub=v;}} type="text"/>
-          <MBtn onClick={()=>{if(isEdit)upd(c=>({...c,slides:c.slides.map(s=>s.id===data.id?{...s,imageUrl:img||s.imageUrl,title:title||s.title,subtitle:sub||s.subtitle}:s)}));else upd(c=>({...c,slides:[...c.slides,{id:uid(),imageUrl:img,title,subtitle:sub}]}));close();}}>Save Slide</MBtn>
+          <div><label className="text-xs text-white/40 uppercase tracking-wider block mb-1.5">Title</label><input type="text" value={data?.title||""} onChange={e=>{title=e.target.value; setPopup(p=>p?{...p,data:{...p.data,title:e.target.value}}:p);}} className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-3 py-2.5 outline-none focus:border-blue-500/50"/></div>
+          <div><label className="text-xs text-white/40 uppercase tracking-wider block mb-1.5">Subtitle</label><input type="text" value={data?.subtitle||""} onChange={e=>{sub=e.target.value; setPopup(p=>p?{...p,data:{...p.data,subtitle:e.target.value}}:p);}} className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-3 py-2.5 outline-none focus:border-blue-500/50"/></div>
+          <MBtn onClick={()=>{
+            const finalImg=data?.imageUrl||img;
+            const finalTitle=data?.title||title;
+            const finalSub=data?.subtitle||sub;
+            if(isEdit) upd(c=>({...c,slides:c.slides.map(s=>s.id===data.id?{...s,imageUrl:finalImg||s.imageUrl,title:finalTitle||s.title,subtitle:finalSub||s.subtitle}:s)}));
+            else upd(c=>({...c,slides:[...c.slides,{id:uid(),imageUrl:finalImg,title:finalTitle,subtitle:finalSub}]}));
+            close();
+          }}>Save Slide</MBtn>
         </Modal>
       );
     }
     if(popup.type==="addGallery"){
-      let img="",cap="",cat="Sports";
+      let img=data?.imageUrl||"",cap="",cat="Sports";
+      const previewGallery=data?.imageUrl||"";
       return(
         <Modal title="Add Gallery Photo" onClose={close}>
           <div><label className="text-xs text-white/40 uppercase block mb-1.5">Photo</label>
-            <label className="flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-white/10 rounded-xl cursor-pointer hover:border-blue-500/30 hover:bg-blue-500/5 transition-all group">
-              <Upload size={20} className="text-white/20 group-hover:text-blue-400 mb-1"/><span className="text-xs text-white/30">Click to upload or drag & drop</span>
-              <input type="file" accept="image/*" className="hidden" onChange={imgUpload(url=>{img=url;})}/>
-            </label>
-            <input value={img} onChange={e=>{img=e.target.value;}} placeholder="...or paste URL" className="w-full bg-white/5 border border-white/10 text-white text-xs rounded-xl px-3 py-2 outline-none focus:border-blue-500/50 placeholder-white/20 mt-2"/>
+            <div className="relative rounded-xl overflow-hidden mb-2 bg-white/5 border border-white/10" style={{height:"140px"}}>
+              {previewGallery
+                ? <img src={previewGallery} className="w-full h-full object-cover"/>
+                : <label className="flex flex-col items-center justify-center w-full h-full cursor-pointer hover:bg-blue-500/5 transition-all group">
+                    <Upload size={20} className="text-white/20 group-hover:text-blue-400 mb-1"/><span className="text-xs text-white/30">Click to upload or drag & drop</span>
+                    <input type="file" accept="image/*" className="hidden" onChange={e=>{
+                      const f=e.target.files?.[0]; if(!f) return;
+                      const r=new FileReader();
+                      r.onload=ev=>{const url=ev.target?.result as string; img=url; setPopup(p=>p?{...p,data:{...p.data,imageUrl:url}}:p);};
+                      r.readAsDataURL(f); e.target.value="";
+                    }}/>
+                  </label>
+              }
+              {previewGallery&&<label className="absolute inset-0 flex items-center justify-center bg-black/50 cursor-pointer opacity-0 hover:opacity-100 transition-opacity">
+                <div className="flex flex-col items-center gap-1"><Upload size={18} className="text-white"/><span className="text-white text-xs">Change</span></div>
+                <input type="file" accept="image/*" className="hidden" onChange={e=>{
+                  const f=e.target.files?.[0]; if(!f) return;
+                  const r=new FileReader();
+                  r.onload=ev=>{const url=ev.target?.result as string; img=url; setPopup(p=>p?{...p,data:{...p.data,imageUrl:url}}:p);};
+                  r.readAsDataURL(f); e.target.value="";
+                }}/>
+              </label>}
+            </div>
+            <input value={previewGallery} onChange={e=>{img=e.target.value; setPopup(p=>p?{...p,data:{...p.data,imageUrl:e.target.value}}:p);}} placeholder="...or paste URL" className="w-full bg-white/5 border border-white/10 text-white text-xs rounded-xl px-3 py-2 outline-none focus:border-blue-500/50 placeholder-white/20"/>
           </div>
           <Field label="Caption" onChange={v=>{cap=v;}}/>
           <div><label className="text-xs text-white/40 uppercase block mb-1.5">Category</label><select onChange={e=>{cat=e.target.value;}} className="w-full bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-3 py-2.5 outline-none">{["Sports","Academic","Cultural","Leadership","Arts","Other"].map(c=><option key={c}>{c}</option>)}</select></div>
-          <MBtn onClick={()=>{if(img&&cap){upd(c=>({...c,gallery:[...c.gallery,{id:uid(),imageUrl:img,caption:cap,category:cat,date:today}]}));close();}else alert("Image and caption required");}}>Add to Gallery</MBtn>
+          <MBtn onClick={()=>{const finalImg=data?.imageUrl||img; if(finalImg&&cap){upd(c=>({...c,gallery:[...c.gallery,{id:uid(),imageUrl:finalImg,caption:cap,category:cat,date:today}]}));close();}else alert("Image and caption required");}}>Add to Gallery</MBtn>
         </Modal>
       );
     }
@@ -4254,6 +5384,8 @@ function RichEditor({value,onChange}:{value:string;onChange:(v:string)=>void}){
 // PUBLIC WEBSITE
 // ═══════════════════════════════════════════════════════════════════════════════
 function PublicWebsite({state,route,setRoute,onEnterDash}:{state:AppState;route:string;setRoute:(r:string)=>void;onEnterDash:()=>void}){
+  const [siteMounted,setSiteMounted]=useState(false);
+  React.useEffect(()=>{setSiteMounted(true);},[]);
   const [mobileOpen,setMO]=useState(false);
   const cms=state.cms;
   const PAGES=[
@@ -4289,9 +5421,7 @@ function PublicWebsite({state,route,setRoute,onEnterDash}:{state:AppState;route:
       <header className="sticky top-0 z-50 bg-[#0f1729]/95 backdrop-blur-md border-b border-white/10 shadow-xl shadow-black/20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
           <button onClick={()=>nav("home")} className="flex items-center gap-3">
-            {state.settings.logoUrl
-              ?<img src={state.settings.logoUrl} className="w-9 h-9 rounded-lg object-cover"/>
-              :<div className="w-9 h-9 rounded-lg bg-[#C9A84C]/20 border border-[#C9A84C]/30 flex items-center justify-center"><School size={17} className="text-[#C9A84C]"/></div>}
+            <div className="w-9 h-9 rounded-lg overflow-hidden flex-shrink-0 bg-[#C9A84C]/20 border border-[#C9A84C]/30 flex items-center justify-center">{(siteMounted&&state.settings.logoUrl)?<img src={state.settings.logoUrl} className="w-full h-full object-cover"/>:<School size={17} className="text-[#C9A84C]"/>}</div>
             <div className="hidden sm:block"><div className="text-white font-bold text-sm leading-tight" style={{fontFamily:"'Playfair Display',serif"}}>{state.settings.name}</div><div className="text-white/40 text-[10px]">{state.settings.tagline}</div></div>
           </button>
           {/* Desktop nav */}
@@ -4321,17 +5451,17 @@ function PublicWebsite({state,route,setRoute,onEnterDash}:{state:AppState;route:
         {route==="achievements"&&<PageAchievements cms={cms}/>}
         {route==="clubs"      &&<PageClubs    cms={cms}/>}
         {route==="staff"      &&<PageStaff    cms={cms}/>}
-        {route==="downloads"  &&<PageDownloads cms={cms}/>}
+        {route==="downloads"  &&<PageDownloads cms={cms} state={state}/>}
       </div>
 
       {/* Footer */}
       <footer className="bg-[#0f1729] text-white/50 py-12 mt-16">
         <div className="max-w-7xl mx-auto px-6 grid grid-cols-1 md:grid-cols-3 gap-8">
-          <div><div className="flex items-center gap-3 mb-3"><div className="w-8 h-8 rounded-lg bg-[#C9A84C]/20 flex items-center justify-center"><School size={15} className="text-[#C9A84C]"/></div><span className="text-white font-bold" style={{fontFamily:"'Playfair Display',serif"}}>{state.settings.name}</span></div><p className="text-sm">{state.settings.tagline}</p></div>
+          <div><div className="flex items-center gap-3 mb-3"><div className="w-8 h-8 rounded-lg bg-[#C9A84C]/20 flex items-center justify-center overflow-hidden">{(siteMounted&&state.settings.logoUrl)?<img src={state.settings.logoUrl} className="w-full h-full object-cover"/>:<School size={15} className="text-[#C9A84C]"/>}</div><span className="text-white font-bold" style={{fontFamily:"'Playfair Display',serif"}}>{state.settings.name}</span></div><p className="text-sm">{state.settings.tagline}</p></div>
           <div><h4 className="text-white font-semibold mb-3 text-sm">Quick Links</h4><div className="space-y-1.5">{PAGES.map(p=><button key={p.id} onClick={()=>nav(p.id)} className="block text-sm hover:text-[#C9A84C] transition-colors text-left">{p.label}</button>)}</div></div>
           <div><h4 className="text-white font-semibold mb-3 text-sm">Contact</h4><p className="text-sm">{cms.visionMission.contact}</p><p className="text-sm mt-1">{cms.visionMission.address}</p><button onClick={onEnterDash} className="mt-3 pub-btn text-xs px-3 py-2 rounded-lg inline-flex items-center gap-1.5"><Lock size={11}/>Staff Portal</button></div>
         </div>
-        <div className="max-w-7xl mx-auto px-6 mt-8 pt-8 border-t border-white/5 text-center text-xs text-white/20">© {new Date().getFullYear()} {state.settings.name}. All rights reserved.</div>
+        <div className="max-w-7xl mx-auto px-6 mt-8 pt-8 border-t border-white/5 text-center text-xs text-white/20">© 2026 {state.settings.name}. All rights reserved.</div>
       </footer>
     </div>
   );
@@ -4340,24 +5470,30 @@ function PublicWebsite({state,route,setRoute,onEnterDash}:{state:AppState;route:
 // ─── Home Page ─────────────────────────────────────────────────────────────────
 function PageHome({cms,onNav,settings}:{cms:CMS;onNav:(r:string)=>void;settings:AppState["settings"]}){
   const [slide,setSlide]=useState(0);
-  React.useEffect(()=>{const t=setInterval(()=>setSlide(s=>(s+1)%Math.max(1,cms.slides.length)),5000);return()=>clearInterval(t);},[cms.slides.length]);
-  const cur=cms.slides[slide];
+  const [mounted,setMounted]=useState(false);
+  React.useEffect(()=>{setMounted(true);},[]);
+  React.useEffect(()=>{if(!mounted)return;const t=setInterval(()=>setSlide(s=>(s+1)%Math.max(1,cms.slides.length)),5000);return()=>clearInterval(t);},[cms.slides.length,mounted]);
+  const activeSlide=mounted?slide:0;
+  const defaultSlide=cms.slides[0];
+  const cur=mounted?cms.slides[activeSlide]:defaultSlide;
   return(
     <div>
       {/* Hero Slider */}
       <div className="relative h-[540px] overflow-hidden">
-        {cms.slides.map((sl,i)=>(
-          <div key={sl.id} className="absolute inset-0 transition-opacity duration-1000" style={{opacity:i===slide?1:0}}>
-            <img src={sl.imageUrl} className="w-full h-full object-cover"/>
-            <div className="absolute inset-0" style={{background:"linear-gradient(to right, rgba(15,23,41,0.85) 0%, rgba(15,23,41,0.4) 60%, transparent 100%)"}}/>
-          </div>
-        ))}
-        <div className="absolute inset-0 flex items-center">
+        {!mounted
+          ? <div className="absolute inset-0 bg-[#0f1729]"><div className="absolute inset-0" style={{background:"linear-gradient(to right, rgba(15,23,41,0.85) 0%, rgba(15,23,41,0.4) 60%, transparent 100%)"}}/></div>
+          : cms.slides.map((sl,i)=>(
+            <div key={sl.id} className="absolute inset-0 transition-opacity duration-1000" style={{opacity:i===activeSlide?1:0}}>
+              <img src={sl.imageUrl} className="w-full h-full object-cover"/>
+              <div className="absolute inset-0" style={{background:"linear-gradient(to right, rgba(15,23,41,0.85) 0%, rgba(15,23,41,0.4) 60%, transparent 100%)"}}/>
+            </div>
+          ))}
+        <div className="absolute inset-0 flex items-center" suppressHydrationWarning>
           <div className="max-w-7xl mx-auto px-6 w-full">
             <div className="max-w-xl" style={{animation:"fadeUp 0.6s ease forwards"}}>
-              <div className="text-[#C9A84C] text-xs font-mono uppercase tracking-[4px] mb-4">{settings.tagline}</div>
-              <h1 className="text-4xl md:text-5xl font-bold text-white leading-tight mb-4" style={{fontFamily:"'Playfair Display',serif"}}>{cur?.title||"Welcome"}</h1>
-              <p className="text-white/70 text-lg mb-8">{cur?.subtitle||""}</p>
+              <div className="text-[#C9A84C] text-xs font-mono uppercase tracking-[4px] mb-4" suppressHydrationWarning>{mounted?settings.tagline:""}</div>
+              <h1 className="text-4xl md:text-5xl font-bold text-white leading-tight mb-4" style={{fontFamily:"'Playfair Display',serif"}} suppressHydrationWarning>{mounted?(cur?.title||"Welcome"):"Welcome"}</h1>
+              <p className="text-white/70 text-lg mb-8" suppressHydrationWarning>{mounted?(cur?.subtitle||""):""}</p>
               <div className="flex gap-3">
                 <button onClick={()=>onNav("about")} className="pub-btn px-6 py-3 rounded-xl text-sm font-bold transition-all hover:scale-105">Explore Our School</button>
                 <button onClick={()=>onNav("news")} className="px-6 py-3 rounded-xl text-sm font-bold border border-white/20 text-white hover:bg-white/10 transition-all">Latest News</button>
@@ -4367,7 +5503,7 @@ function PageHome({cms,onNav,settings}:{cms:CMS;onNav:(r:string)=>void;settings:
         </div>
         {/* Slider dots */}
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-2">
-          {cms.slides.map((_,i)=><button key={i} onClick={()=>setSlide(i)} className={`w-2 h-2 rounded-full transition-all ${i===slide?"bg-[#C9A84C] w-6":"bg-white/30"}`}/>)}
+          {cms.slides.map((_,i)=><button key={i} onClick={()=>setSlide(i)} className={`w-2 h-2 rounded-full transition-all ${i===activeSlide?"bg-[#C9A84C] w-6":"bg-white/30"}`}/>)}
         </div>
         {/* Arrows */}
         <button onClick={()=>setSlide(s=>(s-1+cms.slides.length)%cms.slides.length)} className="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center backdrop-blur-sm transition-all"><ChevronLeft size={18} className="text-white"/></button>
@@ -4721,60 +5857,151 @@ function PageStaff({cms}:{cms:CMS}){
 }
 
 // ─── Downloads Page ────────────────────────────────────────────────────────────
-function PageDownloads({cms}:{cms:CMS}){
-  const [filter,setFilter]=useState<"all"|"image"|"pdf">("all");
-  const shown=filter==="all"?cms.media:cms.media.filter(m=>m.type===filter);
+function PageDownloads({cms,state}:{cms:CMS;state?:AppState}){
+  const cats=(cms.downloadCategories)||[];
+  const [selCat,setSelCat]=useState<string>("");
+  const [selClass,setSelClass]=useState<string>("");
+  const [selSubject,setSelSubject]=useState<string>("");
+
+  // Classes/subjects visible in public (from uploaded files)
+  const classIds=[...new Set(cms.media.filter(m=>m.classId).map(m=>m.classId!))];
+  const subjectIds=[...new Set(cms.media.filter(m=>m.subjectId&&(!selClass||m.classId===selClass)).map(m=>m.subjectId!))];
+
+  const files=cms.media.filter(m=>{
+    if(selCat&&m.category!==selCat) return false;
+    if(selClass&&m.classId!==selClass) return false;
+    if(selSubject&&m.subjectId!==selSubject) return false;
+    return true;
+  });
+
   return(
     <div>
       <div className="pub-gradient py-20 text-center">
         <div className="text-[#C9A84C] text-xs font-mono uppercase tracking-[4px] mb-3">Resources</div>
         <h1 className="text-4xl font-bold text-white" style={{fontFamily:"'Playfair Display',serif"}}>Downloads</h1>
-        <p className="text-white/60 mt-3 max-w-lg mx-auto">Access school circulars, past papers, and media resources shared by the administration.</p>
+        <p className="text-white/60 mt-3 max-w-lg mx-auto">Access school circulars, past papers, forms, and resources shared by the administration.</p>
       </div>
       <section className="pub-section">
-        <div className="max-w-5xl mx-auto px-6">
-          {cms.media.length===0?(
-            <div className="text-center py-24 text-gray-400">
-              <FileText size={48} className="mx-auto mb-4 opacity-30"/>
-              <p className="text-lg font-medium">No files available yet.</p>
-              <p className="text-sm mt-1">Check back soon — the school admin will upload resources here.</p>
-            </div>
-          ):(
+        <div className="max-w-5xl mx-auto px-6 space-y-8">
+          {/* Category tiles */}
+          {!selCat&&(
             <>
-              <div className="flex gap-2 mb-8">
-                {([["all","All Files"],["pdf","PDFs"],["image","Images"]] as const).map(([v,l])=>(
-                  <button key={v} onClick={()=>setFilter(v)} className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${filter===v?"pub-btn":"border border-gray-200 text-gray-600 hover:border-[#C9A84C] hover:text-[#C9A84C]"}`}>{l}</button>
-                ))}
-                <span className="ml-auto text-sm text-gray-400 self-center">{shown.length} file{shown.length!==1?"s":""}</span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {shown.map(m=>(
-                  <a key={m.id} href={m.url} download={m.name} target="_blank" rel="noopener noreferrer"
-                    className="pub-card p-4 flex gap-4 items-start hover:shadow-lg hover:border-[#C9A84C]/40 transition-all group cursor-pointer">
-                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${m.type==="pdf"?"bg-red-50 border border-red-100":"bg-blue-50 border border-blue-100"}`}>
-                      {m.type==="pdf"
-                        ?<FileText size={22} className="text-red-500"/>
-                        :<Image size={22} className="text-blue-500"/>}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-[#0f1729] text-sm truncate group-hover:text-[#C9A84C] transition-colors">{m.name}</div>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono ${m.type==="pdf"?"bg-red-100 text-red-700":"bg-blue-100 text-blue-700"}`}>{m.type.toUpperCase()}</span>
-                        <span className="text-gray-400 text-xs font-mono">{m.size}</span>
-                      </div>
-                      <div className="text-gray-400 text-xs mt-1 flex items-center gap-1"><Calendar size={10}/>{m.uploadedAt}</div>
-                    </div>
-                    <Download size={14} className="text-gray-300 group-hover:text-[#C9A84C] transition-colors flex-shrink-0 mt-1"/>
-                  </a>
-                ))}
-              </div>
+              {cats.length>0?(
+                <div>
+                  <h2 className="text-[#1a2540] text-xl font-bold mb-5" style={{fontFamily:"'Playfair Display',serif"}}>Browse by Category</h2>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                    {cats.map(cat=>{
+                      const count=cms.media.filter(m=>m.category===cat.id).length;
+                      return(
+                        <button key={cat.id} onClick={()=>setSelCat(cat.id)} className="bg-[#1a2540] hover:bg-[#1e2d50] border border-white/10 hover:border-[#C9A84C]/40 rounded-2xl p-6 text-center transition-all group shadow-sm">
+                          <div className="w-14 h-14 rounded-2xl bg-[#C9A84C]/10 border border-[#C9A84C]/20 flex items-center justify-center mx-auto mb-4 group-hover:bg-[#C9A84C]/20 transition-all">
+                            {(()=>{
+                              const n=cat.name.toLowerCase();
+                              if(n.includes("paper")||n.includes("past")) return <FileText size={26} className="text-[#C9A84C]"/>;
+                              if(n.includes("circular")) return <Bell size={26} className="text-[#C9A84C]"/>;
+                              if(n.includes("form")) return <ClipboardList size={26} className="text-[#C9A84C]"/>;
+                              if(n.includes("lesson")||n.includes("note")) return <BookOpen size={26} className="text-[#C9A84C]"/>;
+                              if(n.includes("homework")||n.includes("assign")) return <ClipboardCheck size={26} className="text-[#C9A84C]"/>;
+                              if(n.includes("letter")) return <FileText size={26} className="text-[#C9A84C]"/>;
+                              if(n.includes("image")||n.includes("photo")) return <Image size={26} className="text-[#C9A84C]"/>;
+                              return <Download size={26} className="text-[#C9A84C]"/>;
+                            })()}
+                          </div>
+                          <div className="text-white font-semibold text-sm">{cat.name}</div>
+                          <div className="text-white/40 text-xs mt-1">{count} file{count!==1?"s":""}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ):(
+                <div className="text-center py-16 text-white/30">No download categories set up yet.</div>
+              )}
+              {/* All files without category */}
+              {cms.media.filter(m=>!m.category).length>0&&(
+                <div>
+                  <h3 className="text-white/50 text-xs font-semibold uppercase tracking-widest mb-4">Other Files</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {cms.media.filter(m=>!m.category).map(m=>(
+                      <a key={m.id} href={m.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 bg-[#1a2540]/5 hover:bg-[#1a2540]/10 border border-[#1a2540]/10 hover:border-[#C9A84C]/30 rounded-xl px-4 py-3 transition-all group">
+                        <span className="text-xl">{m.type==="pdf"?"📄":"🖼️"}</span>
+                        <div className="flex-1 min-w-0"><div className="text-[#1a2540] text-sm truncate">{m.name}</div><div className="text-[#1a2540]/40 text-xs">{m.uploadedAt}</div></div>
+                        <Download size={14} className="text-[#1a2540]/30 group-hover:text-[#C9A84C]"/>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
             </>
           )}
+
+          {/* Category selected: show filters + files */}
+          {selCat&&(()=>{
+            const cat=cats.find(x=>x.id===selCat);
+            const catFiles=cms.media.filter(m=>m.category===selCat);
+            const catClassIds=[...new Set(catFiles.filter(m=>m.classId).map(m=>m.classId!))];
+            const filteredFiles=catFiles.filter(m=>{
+              if(selClass&&m.classId!==selClass) return false;
+              if(selSubject&&m.subjectId!==selSubject) return false;
+              return true;
+            });
+            const catSubjectIds=[...new Set(catFiles.filter(m=>m.subjectId&&(!selClass||m.classId===selClass)).map(m=>m.subjectId!))];
+            return(
+              <div className="space-y-6">
+                <div className="flex items-center gap-3">
+                  <button onClick={()=>{setSelCat("");setSelClass("");setSelSubject("");}} className="text-[#1a2540]/60 hover:text-[#1a2540] flex items-center gap-1.5 text-sm"><ChevronLeft size={16}/>Back</button>
+                  <div className="text-2xl">{cat?.icon}</div>
+                  <h2 className="text-[#1a2540] text-xl font-bold">{cat?.name}</h2>
+                  <span className="text-[#1a2540]/40 text-sm ml-1">{catFiles.length} file{catFiles.length!==1?"s":""}</span>
+                </div>
+                {/* Class + Subject filters */}
+                {(catClassIds.length>0||catSubjectIds.length>0)&&(
+                  <div className="flex gap-3 flex-wrap">
+                    {catClassIds.length>0&&(
+                      <select value={selClass} onChange={e=>{setSelClass(e.target.value);setSelSubject("");}} className="bg-white border border-[#1a2540]/15 text-[#1a2540] text-sm rounded-xl px-3 py-2 outline-none">
+                        <option value="">All Classes</option>
+                        {catClassIds.map(id=>{
+                          const f=catFiles.find(m=>m.classId===id);
+                          return <option key={id} value={id}>Class {f?.className||id}</option>;
+                        })}
+                      </select>
+                    )}
+                    {catSubjectIds.length>0&&(
+                      <select value={selSubject} onChange={e=>setSelSubject(e.target.value)} className="bg-white border border-[#1a2540]/15 text-[#1a2540] text-sm rounded-xl px-3 py-2 outline-none">
+                        <option value="">All Subjects</option>
+                        {catSubjectIds.map(id=>{
+                          const f=catFiles.find(m=>m.subjectId===id);
+                          return <option key={id} value={id}>{f?.subjectName||id}</option>;
+                        })}
+                      </select>
+                    )}
+                  </div>
+                )}
+                {filteredFiles.length===0?(
+                  <div className="text-[#1a2540]/30 text-sm text-center py-12">No files found.</div>
+                ):(
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {filteredFiles.map(m=>(
+                      <a key={m.id} href={m.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 bg-[#1a2540]/5 hover:bg-[#1a2540]/10 border border-[#1a2540]/10 hover:border-[#C9A84C]/30 rounded-xl px-4 py-3 transition-all group">
+                        <span className="text-2xl">{m.type==="pdf"?"📄":"🖼️"}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[#1a2540] text-sm font-medium truncate">{m.name}</div>
+                          <div className="text-[#1a2540]/40 text-xs mt-0.5">{m.uploadedAt} · {m.size}</div>
+                        </div>
+                        <Download size={16} className="text-[#1a2540]/20 group-hover:text-[#C9A84C] transition-colors flex-shrink-0"/>
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
       </section>
     </div>
   );
 }
+
 
 function RegistrationScreen({state,setState,onBack}:{state:AppState;setState:(fn:(s:AppState)=>AppState)=>void;onBack:()=>void}){
   const [step,setStep]=useState<"choose"|"form"|"done">("choose");
@@ -4885,6 +6112,13 @@ export default function SchoolERP() {
           fees:       { ...INITIAL.fees,       ...parsed.fees },
           behavior:   { ...INITIAL.behavior,   ...parsed.behavior },
           counseling: { ...INITIAL.counseling, ...parsed.counseling },
+          cms: parsed.cms ? { ...INITIAL.cms, ...parsed.cms, downloadCategories: parsed.cms.downloadCategories||INITIAL.cms.downloadCategories } : INITIAL.cms,
+          ...(parsed.cms ? {cms: {
+            ...INITIAL.cms, ...parsed.cms,
+            downloadCategories: parsed.cms.downloadCategories || INITIAL.cms.downloadCategories,
+          }} : {}),
+          exams:       parsed.exams       || INITIAL.exams,
+          examRecords: parsed.examRecords || [],
         };
       }
       const fallback: SchoolSettings = settingsBak
@@ -4925,9 +6159,11 @@ export default function SchoolERP() {
       if (configSaveTimer.current) clearTimeout(configSaveTimer.current);
       configSaveTimer.current = setTimeout(() => {
         sb.saveConfig({
-          subjects:  next.subjects,
-          classes:   next.classes,
-          timetable: next.timetable,
+          subjects:    next.subjects,
+          classes:     next.classes,
+          timetable:   next.timetable,
+          exams:       next.exams,
+          examRecords: next.examRecords,
           settings:  { ...next.settings, logoUrl: next.settings.logoUrl?.startsWith("data:") ? "" : (next.settings.logoUrl || "") },
         });
       }, 800);
@@ -4968,9 +6204,11 @@ export default function SchoolERP() {
     ]).then(([students, teachers, items, labs, fees, behavior, counseling, config]) => {
       update(prev => ({
         ...prev,
-        subjects:  config?.subjects  ?? prev.subjects,
-        classes:   config?.classes   ?? prev.classes,
-        timetable: config?.timetable ?? prev.timetable,
+        subjects:    config?.subjects  ?? prev.subjects,
+        classes:     config?.classes   ?? prev.classes,
+        timetable:   config?.timetable ?? prev.timetable,
+        exams:       config?.exams       ?? prev.exams,
+        examRecords: config?.examRecords ?? prev.examRecords,
         // Protect sensitive/local-only fields from Supabase overwrite
         settings:  config?.settings  ? {
           ...prev.settings,
@@ -5024,7 +6262,7 @@ export default function SchoolERP() {
   }
   function dbToLab(r: any): Lab {
     return { id: r.id, name: r.name, icon: r.icon, password: r.password,
-      description: r.description || "", color: r.color || "bg-blue-500/10 border-blue-500/20" };
+      description: r.description || "", color: r.color || "bg-blue-500/10 border-blue-500/20", assignedTeacherId: r.assigned_teacher_id||undefined };
   }
   function dbToFee(r: any): FeeRecord {
     return { id: r.id, studentId: r.student_id, category: r.category, label: r.label,
@@ -5112,11 +6350,11 @@ export default function SchoolERP() {
     // Labs
     async addLab(l) {
       update(st => ({ ...st, inventory: { ...st.inventory, labs: [...st.inventory.labs, l] } }));
-      try { await sb.upsert("labs", { id: l.id, name: l.name, icon: l.icon, password: l.password, description: l.description, color: l.color }); } catch(e) { console.warn("[db.addLab]", e); }
+      try { await sb.upsert("labs", { id: l.id, name: l.name, icon: l.icon, password: l.password, description: l.description, color: l.color, assigned_teacher_id: l.assignedTeacherId??null }); } catch(e) { console.warn("[db.addLab]", e); }
     },
     async updateLab(l) {
       update(st => ({ ...st, inventory: { ...st.inventory, labs: st.inventory.labs.map(x => x.id === l.id ? l : x) } }));
-      try { await sb.update("labs", l.id, { name: l.name, icon: l.icon, password: l.password, description: l.description, color: l.color }); } catch(e) { console.warn("[db.updateLab]", e); }
+      try { await sb.update("labs", l.id, { name: l.name, icon: l.icon, password: l.password, description: l.description, color: l.color, assigned_teacher_id: l.assignedTeacherId??null }); } catch(e) { console.warn("[db.updateLab]", e); }
     },
     async deleteLab(id) {
       update(st => ({ ...st, inventory: { ...st.inventory, labs: st.inventory.labs.filter(x => x.id !== id), items: st.inventory.items.filter(x => x.labId !== id) } }));
@@ -5211,10 +6449,10 @@ export default function SchoolERP() {
           {dbStatus==="ok"&&<div className="flex items-center gap-1.5 bg-[#080D18] border border-emerald-500/20 rounded-full px-3 py-1.5 text-[10px] text-emerald-400"><Wifi size={10}/>Supabase connected</div>}
           {dbStatus==="offline"&&<div className="flex items-center gap-1.5 bg-[#080D18] border border-amber-500/20 rounded-full px-3 py-1.5 text-[10px] text-amber-400"><WifiOff size={10}/>Local mode (no DB)</div>}
         </div>
-        {(user.role==="admin")         &&<AdminView   user={user} state={state} setState={update} db={db} onLogout={()=>{try{localStorage.removeItem(SESSION_KEY);localStorage.removeItem(SESSION_EXPIRY);localStorage.removeItem(SESSION_DASH);}catch{}setUser(null);setInDash(false);}}/>}
-        {(user.role==="support_admin") &&<AdminView   user={user} state={state} setState={update} db={db} onLogout={()=>{try{localStorage.removeItem(SESSION_KEY);localStorage.removeItem(SESSION_EXPIRY);localStorage.removeItem(SESSION_DASH);}catch{}setUser(null);setInDash(false);}} isSA/>}
-        {user.role==="teacher"         &&<TeacherView user={user} state={state} setState={update} onLogout={()=>{try{localStorage.removeItem(SESSION_KEY);localStorage.removeItem(SESSION_EXPIRY);localStorage.removeItem(SESSION_DASH);}catch{}setUser(null);setInDash(false);}}/>}
-        {user.role==="student"         &&<StudentView user={user} state={state} setState={update} onLogout={()=>{try{localStorage.removeItem(SESSION_KEY);localStorage.removeItem(SESSION_EXPIRY);localStorage.removeItem(SESSION_DASH);}catch{}setUser(null);setInDash(false);}}/>}
+        {(user.role==="admin")         &&<AdminView   user={user} state={state} setState={update} db={db} onLogout={()=>{try{localStorage.removeItem(SESSION_KEY);localStorage.removeItem(SESSION_EXPIRY);localStorage.removeItem(SESSION_DASH);}catch{}setUser(null);setInDash(false);}} onBackToSite={()=>setInDash(false)}/>}
+        {(user.role==="support_admin") &&<AdminView   user={user} state={state} setState={update} db={db} onLogout={()=>{try{localStorage.removeItem(SESSION_KEY);localStorage.removeItem(SESSION_EXPIRY);localStorage.removeItem(SESSION_DASH);}catch{}setUser(null);setInDash(false);}} onBackToSite={()=>setInDash(false)} isSA/>}
+        {user.role==="teacher"         &&<TeacherView user={user} state={state} setState={update} db={db} onLogout={()=>{try{localStorage.removeItem(SESSION_KEY);localStorage.removeItem(SESSION_EXPIRY);localStorage.removeItem(SESSION_DASH);}catch{}setUser(null);setInDash(false);}} onBackToSite={()=>setInDash(false)}/>}
+        {user.role==="student"         &&<StudentView user={user} state={state} setState={update} onLogout={()=>{try{localStorage.removeItem(SESSION_KEY);localStorage.removeItem(SESSION_EXPIRY);localStorage.removeItem(SESSION_DASH);}catch{}setUser(null);setInDash(false);}} onBackToSite={()=>setInDash(false)}/>}
       </>
     );
   }
