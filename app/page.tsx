@@ -1465,7 +1465,7 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
     {id:"settings",         label:"Settings",         icon:Settings},
   ];
 
-  function importStudentsCSV(text:string){
+  async function importStudentsCSV(text:string){
     const rows=parseCSV(text);
     const ns:Student[]=rows.map(r=>{
       if(!r.name||!r.rollno) return null;
@@ -1476,10 +1476,11 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
     }).filter(Boolean) as Student[];
     if(!ns.length){setCsvMsg("No valid rows. Required columns: name, rollno"); return;}
     const newOnes=ns.filter(n=>!state.students.find(x=>x.rollNo===n.rollNo));
-    newOnes.forEach(s=>db.addStudent(s));
+    setCsvMsg("⏳ Importing...");
+    await Promise.all(newOnes.map(s=>db.addStudent(s)));
     setCsvMsg(`✓ Imported ${newOnes.length} students successfully`);
   }
-  function importTeachersCSV(text:string){
+  async function importTeachersCSV(text:string){
     const rows=parseCSV(text);
     const nt:Teacher[]=rows.map(r=>{
       if(!r.name||!r.email) return null;
@@ -1488,8 +1489,26 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
     }).filter(Boolean) as Teacher[];
     if(!nt.length){setCsvMsg("No valid rows. Required columns: name, email"); return;}
     const newOnes=nt.filter(n=>!state.teachers.find(x=>x.email===n.email));
-    newOnes.forEach(t=>db.addTeacher(t));
+    setCsvMsg("⏳ Importing...");
+    await Promise.all(newOnes.map(t=>db.addTeacher(t)));
     setCsvMsg(`✓ Imported ${newOnes.length} teachers successfully`);
+  }
+  async function importSubjectsCSV(text:string){
+    const rows=parseCSV(text);
+    const ns:any[]=rows.map(r=>{
+      if(!r.name||!r.code) return null;
+      const tid=state.teachers.find(t=>t.name===r.teacher_name||t.email===r.teacher_email)?.id||"";
+      const cids=r.classes?r.classes.split("|").map((cn:string)=>{const[nm,sec]=cn.trim().split("-");return state.classes.find(c=>c.name===nm&&c.section===sec)?.id;}).filter(Boolean):[];
+      return{id:uid(),name:r.name,code:r.code.toUpperCase(),classIds:cids,teacherId:tid,category:r.category||"General"};
+    }).filter(Boolean);
+    if(!ns.length){setCsvMsg("No valid rows. Required columns: name, code"); return;}
+    const newOnes=ns.filter(n=>!state.subjects.find(x=>x.code===n.code));
+    setCsvMsg("⏳ Importing...");
+    await Promise.all(newOnes.map(async(s:any)=>{
+      upd(st=>({...st,subjects:[...st.subjects,s]}));
+      try{await sb.upsert("subjects",{id:s.id,name:s.name,code:s.code,class_ids:s.classIds,teacher_id:s.teacherId||null});}catch(e){console.warn("[sb.subjects]",e);}
+    }));
+    setCsvMsg(`✓ Imported ${newOnes.length} subjects successfully`);
   }
   function importTimetableCSV(text:string){
     const rows=parseCSV(text); let count=0;
@@ -1743,7 +1762,10 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-bold text-white">Subject Management</h2>
-            <button onClick={()=>setPopup({type:"addSubject"})} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-2 rounded-lg transition-colors"><Plus size={14}/>Add Subject</button>
+            <div className="flex items-center gap-2">
+              <button onClick={()=>setPopup({type:"addSubject"})} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-2 rounded-lg transition-colors"><Plus size={14}/>Add Subject</button>
+              <label className="flex items-center gap-1.5 bg-[#0d1424] border border-white/10 hover:border-white/20 text-white/70 text-xs px-3 py-2 rounded-lg cursor-pointer transition-colors"><Upload size={12}/>Bulk CSV<input type="file" accept=".csv" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(!f)return;const r=new FileReader();r.onload=ev=>{importSubjectsCSV(ev.target?.result as string);e.target.value="";};r.readAsText(f);}}/></label>
+            </div>
           </div>
           <div className="bg-[#080D18] border border-white/5 rounded-xl overflow-hidden overflow-x-auto">
             <table className="w-full">
