@@ -325,7 +325,7 @@ const saveLogo = (url: string) => {
 const BLOOD_GROUPS = ["A+","A-","B+","B-","AB+","AB-","O+","O-"];
 
 const INITIAL: AppState = {
-  settings: { name:"Nexus Academy", tagline:"Excellence in Education", logoUrl:getSavedLogo(), blogUrl:"https://nexusacademy.edu.lk/blog", currency:"LKR", pwAdmin:"admin123", pwCounselor:"couns789", pwStaff:"staff456", pwExam:"exam123", siteTitle:"Bakamuna Mahasen National School" },
+  settings: { name:"Bakamuna Mahasen National School", tagline:"Excellence in Education", logoUrl:getSavedLogo(), blogUrl:"https://bakamuna.edu.lk/blog", currency:"LKR", pwAdmin:"admin123", pwCounselor:"couns789", pwStaff:"staff456", pwExam:"exam123", siteTitle:"Bakamuna Mahasen National School" },
   classes: [
     { id:"c1", name:"9",  section:"A", teacherId:"t1" },
     { id:"c2", name:"10", section:"B", teacherId:"t2" },
@@ -419,7 +419,7 @@ const INITIAL: AppState = {
   },
   cms: {
     slides: [
-      {id:"sl1",imageUrl:"https://images.unsplash.com/photo-1580582932707-520aed937b7b?w=1400&q=80",title:"Welcome to Nexus Academy",subtitle:"Shaping Tomorrow's Leaders Today"},
+      {id:"sl1",imageUrl:"https://images.unsplash.com/photo-1580582932707-520aed937b7b?w=1400&q=80",title:"Welcome to Bakamuna Mahasen National School",subtitle:"Shaping Tomorrow's Leaders Today"},
       {id:"sl2",imageUrl:"https://images.unsplash.com/photo-1523050854058-8df90110c9f1?w=1400&q=80",title:"Excellence in Education",subtitle:"A Legacy of Learning Since 1995"},
       {id:"sl3",imageUrl:"https://images.unsplash.com/photo-1427504494785-3a9ca7044f45?w=1400&q=80",title:"Nurturing Every Talent",subtitle:"Academics · Sports · Arts"},
     ],
@@ -438,7 +438,7 @@ const INITIAL: AppState = {
     ],
     achievements: [
       {id:"a1",title:"National Mathematics Olympiad — Gold",description:"Team Nexus secured the Gold Medal at the National Mathematics Olympiad 2025, competing against 200+ schools.",imageUrl:"https://images.unsplash.com/photo-1567427018141-0584cfcbf1b8?w=600&q=80",category:"academic",year:"2025"},
-      {id:"a2",title:"Inter-School Cricket Champions",description:"The Nexus Academy Cricket Team won the Inter-School Championship for the third consecutive year.",imageUrl:"https://images.unsplash.com/photo-1531415074968-036ba1b575da?w=600&q=80",category:"sports",year:"2025"},
+      {id:"a2",title:"Inter-School Cricket Champions",description:"The Bakamuna Mahasen National School Cricket Team won the Inter-School Championship for the third consecutive year.",imageUrl:"https://images.unsplash.com/photo-1531415074968-036ba1b575da?w=600&q=80",category:"sports",year:"2025"},
       {id:"a3",title:"Best Drama at National Arts Festival",description:"Our Drama Society's production of 'Echoes of Tomorrow' won the Best Drama award at the National Arts Festival.",imageUrl:"https://images.unsplash.com/photo-1507676184212-d03ab07a01bf?w=600&q=80",category:"aesthetic",year:"2024"},
     ],
     clubs: [
@@ -458,16 +458,16 @@ const INITIAL: AppState = {
       {id:"dc7", name:"Images",       icon:"🖼️"},
     ],
     principal: {
-      text:"At Nexus Academy, we believe that every child is a unique constellation of talents waiting to be discovered. Our mission is not merely to educate but to inspire — to ignite the flame of curiosity, nurture resilience, and build the character that will carry our students through life's greatest challenges. We are proud of our legacy and even more excited about our future.",
+      text:"At Bakamuna Mahasen National School, we believe that every child is a unique constellation of talents waiting to be discovered. Our mission is not merely to educate but to inspire — to ignite the flame of curiosity, nurture resilience, and build the character that will carry our students through life's greatest challenges. We are proud of our legacy and even more excited about our future.",
       name:"Dr. Kavindra Perera",
-      title:"Principal, Nexus Academy",
+      title:"Principal, Bakamuna Mahasen National School",
       photo:"https://api.dicebear.com/7.x/avataaars/svg?seed=Principal&backgroundColor=b6e3f4"
     },
     visionMission: {
       vision:"To be a centre of excellence that empowers every learner to reach their full potential and contribute meaningfully to a global society.",
       mission:"Providing a holistic, inclusive, and innovative education that nurtures intellectual curiosity, ethical values, and a lifelong love of learning.",
-      history:"Founded in 1995 by visionary educators, Nexus Academy has grown from a small institution of 200 students to a thriving community of over 1,200 learners. With a legacy of academic excellence and a track record of producing leaders in every field, we continue to build on our founding principles of integrity, innovation, and impact.",
-      contact:"info@nexusacademy.edu.lk | +94 11 234 5678",
+      history:"Founded in 1995 by visionary educators, Bakamuna Mahasen National School has grown from a small institution of 200 students to a thriving community of over 1,200 learners. With a legacy of academic excellence and a track record of producing leaders in every field, we continue to build on our founding principles of integrity, innovation, and impact.",
+      contact:"info@bakamuna.edu.lk | +94 11 234 5678",
       address:"42 Knowledge Lane, Colombo 07, Sri Lanka",
       mapEmbed:"https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3960.9!2d79.8!3d6.9!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2zNsKwNTQnMDAuMCJOIDc5wrA0OCcwMC4wIkU!5e0!3m2!1sen!2slk!4v1234567890"
     },
@@ -7392,14 +7392,6 @@ export default function SchoolERP() {
         behavior:  { records: behavior.length ? behavior.map(dbToBehavior)               : prev.behavior.records },
         counseling:{ profiles: counseling.length ? counseling.map(dbToCounselingProfile) : prev.counseling.profiles },
       }));
-      // Persist Supabase-loaded settings to localStorage so next refresh reads correct name
-      try {
-        if (config?.settings) {
-          const bak = localStorage.getItem("erp_settings_bak");
-          const prev = bak ? JSON.parse(bak) : {};
-          localStorage.setItem("erp_settings_bak", JSON.stringify({ ...prev, ...config.settings, logoUrl: "" }));
-        }
-      } catch {}
       setDbStatus("ok");
     }).catch(() => setDbStatus("offline"));
   }, []);
