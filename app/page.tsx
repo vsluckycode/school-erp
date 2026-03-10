@@ -206,7 +206,7 @@ interface Teacher { id:string; name:string; email:string; subjectIds:string[]; c
 interface Subject { id:string; name:string; code:string; classIds:string[]; teacherIds:string[]; category?:SubjectCategory; }
 interface Class   { id:string; name:string; section:string; teacherId:string }
 interface TimetableSlot { day:string; period:number; subjectId:string; teacherId:string }
-interface SchoolSettings { name:string; tagline:string; logoUrl:string; blogUrl:string; currency:string; pwAdmin:string; pwCounselor:string; pwStaff:string; pwExam:string; }
+interface SchoolSettings { name:string; tagline:string; logoUrl:string; blogUrl:string; currency:string; pwAdmin:string; pwCounselor:string; pwStaff:string; pwExam:string; siteTitle:string; }
 interface SupportAdmin   { id:string; name:string; email:string; password:string; }
 
 // ─── CMS / Public Website Types ──────────────────────────────────────────────
@@ -325,7 +325,7 @@ const saveLogo = (url: string) => {
 const BLOOD_GROUPS = ["A+","A-","B+","B-","AB+","AB-","O+","O-"];
 
 const INITIAL: AppState = {
-  settings: { name:"Nexus Academy", tagline:"Excellence in Education", logoUrl:getSavedLogo(), blogUrl:"https://nexusacademy.edu.lk/blog", currency:"LKR", pwAdmin:"admin123", pwCounselor:"couns789", pwStaff:"staff456", pwExam:"exam123" },
+  settings: { name:"Nexus Academy", tagline:"Excellence in Education", logoUrl:getSavedLogo(), blogUrl:"https://nexusacademy.edu.lk/blog", currency:"LKR", pwAdmin:"admin123", pwCounselor:"couns789", pwStaff:"staff456", pwExam:"exam123", siteTitle:"Bakamuna Mahasen National School" },
   classes: [
     { id:"c1", name:"9",  section:"A", teacherId:"t1" },
     { id:"c2", name:"10", section:"B", teacherId:"t2" },
@@ -5419,6 +5419,7 @@ function SettingsTab({state,upd,isSA,setPopup}:{state:AppState;upd:(fn:(s:AppSta
         <div className="bg-[#080D18] border border-white/5 rounded-xl p-6 space-y-5">
           <div><label className="text-xs text-white/40 uppercase tracking-wider block mb-2">School Name</label><input value={state.settings.name} onChange={e=>upd(s=>({...s,settings:{...s.settings,name:e.target.value}}))} className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-3 outline-none focus:border-blue-500/50"/></div>
           <div><label className="text-xs text-white/40 uppercase tracking-wider block mb-2">Tagline</label><input value={state.settings.tagline} onChange={e=>upd(s=>({...s,settings:{...s.settings,tagline:e.target.value}}))} className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-3 outline-none focus:border-blue-500/50"/></div>
+          <div><label className="text-xs text-white/40 uppercase tracking-wider block mb-1">Browser Tab Title</label><p className="text-white/25 text-[10px] mb-2">What appears on the browser tab — updates instantly</p><input value={state.settings.siteTitle||""} onChange={e=>upd(s=>({...s,settings:{...s.settings,siteTitle:e.target.value}}))} placeholder="e.g. Bakamuna Mahasen National School" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-3 outline-none focus:border-blue-500/50 placeholder-white/20"/></div>
           <div><label className="text-xs text-white/40 uppercase tracking-wider block mb-2">Blog URL</label><input value={state.settings.blogUrl} onChange={e=>upd(s=>({...s,settings:{...s.settings,blogUrl:e.target.value}}))} placeholder="https://..." className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-3 outline-none focus:border-blue-500/50 placeholder-white/20"/></div>
           <div>
             <label className="text-xs text-white/40 uppercase tracking-wider block mb-2">School Logo</label>
@@ -7291,6 +7292,12 @@ export default function SchoolERP() {
       return next;
     });
   };
+
+  // ─── Sync browser tab title ─────────────────────────────────────────────────
+  useEffect(() => {
+    const t = state.settings.siteTitle?.trim();
+    if (t) document.title = t;
+  }, [state.settings.siteTitle]);
 
   // ─── Session restore on mount ────────────────────────────────────────────────
   useEffect(() => {
