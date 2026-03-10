@@ -314,16 +314,6 @@ const getSavedLogo = (): string => {
   if (typeof window === "undefined") return "";
   try { return localStorage.getItem("school_logo") || ""; } catch { return ""; }
 };
-const getSavedSettings = (): Partial<SchoolSettings> => {
-  if (typeof window === "undefined") return {};
-  try {
-    const bak = localStorage.getItem("erp_settings_bak");
-    if (bak) return JSON.parse(bak);
-    const full = localStorage.getItem("erp_app_state");
-    if (full) return JSON.parse(full)?.settings ?? {};
-  } catch {}
-  return {};
-};
 const saveLogo = (url: string) => {
   try {
     if (url) localStorage.setItem("school_logo", url);
@@ -335,7 +325,7 @@ const saveLogo = (url: string) => {
 const BLOOD_GROUPS = ["A+","A-","B+","B-","AB+","AB-","O+","O-"];
 
 const INITIAL: AppState = {
-  settings: (()=>{ const s=getSavedSettings(); return { name:s.name||"Nexus Academy", tagline:s.tagline||"Excellence in Education", logoUrl:getSavedLogo(), blogUrl:s.blogUrl||"https://nexusacademy.edu.lk/blog", currency:s.currency||"LKR", pwAdmin:s.pwAdmin||"admin123", pwCounselor:s.pwCounselor||"couns789", pwStaff:s.pwStaff||"staff456", pwExam:s.pwExam||"exam123", siteTitle:s.siteTitle||"Bakamuna Mahasen National School" }; })(),
+  settings: { name:"Nexus Academy", tagline:"Excellence in Education", logoUrl:getSavedLogo(), blogUrl:"https://nexusacademy.edu.lk/blog", currency:"LKR", pwAdmin:"admin123", pwCounselor:"couns789", pwStaff:"staff456", pwExam:"exam123", siteTitle:"Bakamuna Mahasen National School" },
   classes: [
     { id:"c1", name:"9",  section:"A", teacherId:"t1" },
     { id:"c2", name:"10", section:"B", teacherId:"t2" },
@@ -7402,6 +7392,14 @@ export default function SchoolERP() {
         behavior:  { records: behavior.length ? behavior.map(dbToBehavior)               : prev.behavior.records },
         counseling:{ profiles: counseling.length ? counseling.map(dbToCounselingProfile) : prev.counseling.profiles },
       }));
+      // Persist Supabase-loaded settings to localStorage so next refresh reads correct name
+      try {
+        if (config?.settings) {
+          const bak = localStorage.getItem("erp_settings_bak");
+          const prev = bak ? JSON.parse(bak) : {};
+          localStorage.setItem("erp_settings_bak", JSON.stringify({ ...prev, ...config.settings, logoUrl: "" }));
+        }
+      } catch {}
       setDbStatus("ok");
     }).catch(() => setDbStatus("offline"));
   }, []);
