@@ -157,29 +157,6 @@ const sb = {
       return arr[0]?.data ?? null;
     } catch { return null; }
   },
-
-  async saveLogo(logoUrl: string): Promise<void> {
-    if (!this.isConfigured()) return;
-    try {
-      const h = { ...this.headers(), "Prefer": "resolution=merge-duplicates" } as HeadersInit;
-      await fetch(`${SUPABASE_URL}/rest/v1/app_config`, {
-        method: "POST", headers: h,
-        body: JSON.stringify({ id: "logo", data: { logoUrl } }),
-      });
-    } catch (e) { console.warn("[sb.saveLogo]", e); }
-  },
-
-  async loadLogo(): Promise<string> {
-    if (!this.isConfigured()) return "";
-    try {
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/app_config?id=eq.logo`, {
-        headers: this.headers() as HeadersInit,
-      });
-      if (!res.ok) return "";
-      const arr = await res.json();
-      return arr[0]?.data?.logoUrl ?? "";
-    } catch { return ""; }
-  },
 };
 
 // ─── DB Operations Interface (passed as prop) ─────────────────────────────────
@@ -337,6 +314,16 @@ const getSavedLogo = (): string => {
   if (typeof window === "undefined") return "";
   try { return localStorage.getItem("school_logo") || ""; } catch { return ""; }
 };
+const getSavedSettings = (): Partial<SchoolSettings> => {
+  if (typeof window === "undefined") return {};
+  try {
+    const bak = localStorage.getItem("erp_settings_bak");
+    if (bak) return JSON.parse(bak);
+    const full = localStorage.getItem("erp_app_state");
+    if (full) return JSON.parse(full)?.settings ?? {};
+  } catch {}
+  return {};
+};
 const saveLogo = (url: string) => {
   try {
     if (url) localStorage.setItem("school_logo", url);
@@ -348,7 +335,7 @@ const saveLogo = (url: string) => {
 const BLOOD_GROUPS = ["A+","A-","B+","B-","AB+","AB-","O+","O-"];
 
 const INITIAL: AppState = {
-  settings: { name:"Nexus Academy", tagline:"Excellence in Education", logoUrl:getSavedLogo(), blogUrl:"https://nexusacademy.edu.lk/blog", currency:"LKR", pwAdmin:"admin123", pwCounselor:"couns789", pwStaff:"staff456", pwExam:"exam123", siteTitle:"Bakamuna Mahasen National School" },
+  settings: (()=>{ const s=getSavedSettings(); return { name:s.name||"Nexus Academy", tagline:s.tagline||"Excellence in Education", logoUrl:getSavedLogo(), blogUrl:s.blogUrl||"https://nexusacademy.edu.lk/blog", currency:s.currency||"LKR", pwAdmin:s.pwAdmin||"admin123", pwCounselor:s.pwCounselor||"couns789", pwStaff:s.pwStaff||"staff456", pwExam:s.pwExam||"exam123", siteTitle:s.siteTitle||"Bakamuna Mahasen National School" }; })(),
   classes: [
     { id:"c1", name:"9",  section:"A", teacherId:"t1" },
     { id:"c2", name:"10", section:"B", teacherId:"t2" },
@@ -5451,11 +5438,11 @@ function SettingsTab({state,upd,isSA,setPopup}:{state:AppState;upd:(fn:(s:AppSta
                 {state.settings.logoUrl?<img src={state.settings.logoUrl} className="w-full h-full object-cover"/>:<School size={22} className="text-white/20"/>}
               </div>
               <div className="flex-1 space-y-2">
-                <label className="flex items-center gap-2 cursor-pointer bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-400 text-xs px-3 py-2 rounded-lg transition-colors w-fit"><Upload size={12}/>Upload Image<input type="file" accept="image/*" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(!f)return;const r=new FileReader();r.onload=ev=>{const img=new (window.Image as any)();img.onload=()=>{const cv=document.createElement("canvas");const sc=Math.min(1,200/img.width);cv.width=Math.round(img.width*sc);cv.height=Math.round(img.height*sc);cv.getContext("2d")?.drawImage(img,0,0,cv.width,cv.height);const logoUrl=cv.toDataURL("image/png",0.9);try{localStorage.setItem("school_logo",logoUrl);}catch{}upd(s=>({...s,settings:{...s.settings,logoUrl}}));sb.saveLogo(logoUrl);};img.src=ev.target?.result as string;};r.readAsDataURL(f);}}/></label>
-                <input value={state.settings.logoUrl?.startsWith("data:")?"":(state.settings.logoUrl||"")} onChange={e=>{const logoUrl=e.target.value;try{if(logoUrl)localStorage.setItem("school_logo",logoUrl);else localStorage.removeItem("school_logo");}catch{}upd(s=>({...s,settings:{...s.settings,logoUrl}}));sb.saveLogo(logoUrl);}} placeholder="...or paste image URL" className="w-full bg-white/5 border border-white/10 text-white text-xs rounded-lg px-3 py-2 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+                <label className="flex items-center gap-2 cursor-pointer bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-400 text-xs px-3 py-2 rounded-lg transition-colors w-fit"><Upload size={12}/>Upload Image<input type="file" accept="image/*" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(!f)return;const r=new FileReader();r.onload=ev=>{const img=new (window.Image as any)();img.onload=()=>{const cv=document.createElement("canvas");const sc=Math.min(1,200/img.width);cv.width=Math.round(img.width*sc);cv.height=Math.round(img.height*sc);cv.getContext("2d")?.drawImage(img,0,0,cv.width,cv.height);const logoUrl=cv.toDataURL("image/png",0.9);try{localStorage.setItem("school_logo",logoUrl);}catch{}upd(s=>({...s,settings:{...s.settings,logoUrl}}));};img.src=ev.target?.result as string;};r.readAsDataURL(f);}}/></label>
+                <input value={state.settings.logoUrl?.startsWith("data:")?"":(state.settings.logoUrl||"")} onChange={e=>{const logoUrl=e.target.value;try{if(logoUrl)localStorage.setItem("school_logo",logoUrl);else localStorage.removeItem("school_logo");}catch{}upd(s=>({...s,settings:{...s.settings,logoUrl}}));}} placeholder="...or paste image URL" className="w-full bg-white/5 border border-white/10 text-white text-xs rounded-lg px-3 py-2 outline-none focus:border-blue-500/50 placeholder-white/20"/>
               </div>
             </div>
-            {state.settings.logoUrl&&<button onClick={()=>{try{localStorage.removeItem("school_logo");}catch{}upd(s=>({...s,settings:{...s.settings,logoUrl:""}}));sb.saveLogo("");} } className="mt-2 text-xs text-red-400/60 hover:text-red-400 transition-colors">Remove logo</button>}
+            {state.settings.logoUrl&&<button onClick={()=>{try{localStorage.removeItem("school_logo");}catch{}upd(s=>({...s,settings:{...s.settings,logoUrl:""}}))} } className="mt-2 text-xs text-red-400/60 hover:text-red-400 transition-colors">Remove logo</button>}
           </div>
           {!isSA&&(
             <div>
@@ -7367,8 +7354,7 @@ export default function SchoolERP() {
       sb.select<any>("counseling_profiles"),
       sb.loadConfig(),
       sb.loadCms(),
-      sb.loadLogo(),
-    ]).then(([students, teachers, items, labs, fees, behavior, counseling, config, cmsDb, logoDb]) => {
+    ]).then(([students, teachers, items, labs, fees, behavior, counseling, config, cmsDb]) => {
       update(prev => ({
         ...prev,
         subjects:    config?.subjects  ?? prev.subjects,
@@ -7380,7 +7366,7 @@ export default function SchoolERP() {
         settings:  config?.settings  ? {
           ...prev.settings,
           ...config.settings,
-          logoUrl:      (logoDb && (logoDb as string).length > 0) ? (logoDb as string) : (prev.settings.logoUrl || ""),  // prefer Supabase logo
+          logoUrl:      prev.settings.logoUrl,       // logo is local-only (stripped from config)
           pwAdmin:      prev.settings.pwAdmin,       // passwords are local-only
           pwCounselor:  prev.settings.pwCounselor,
           pwStaff:      prev.settings.pwStaff,
