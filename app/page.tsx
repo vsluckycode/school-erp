@@ -7293,25 +7293,27 @@ export default function SchoolERP() {
     });
   };
 
-  // ─── Sync browser tab title (runs on mount + every siteTitle change) ─────────
+  // ─── Sync browser tab title ───────────────────────────────────────────────────
   useEffect(() => {
-    // On mount: try localStorage backup first (available before state hydrates)
+    // Read title on mount from all possible sources, most-specific first
+    try {
+      const full = localStorage.getItem("erp_app_state");
+      if (full) { const t = JSON.parse(full)?.settings?.siteTitle?.trim(); if (t) { document.title = t; return; } }
+    } catch {}
     try {
       const bak = localStorage.getItem("erp_settings_bak");
-      if (bak) {
-        const t = JSON.parse(bak)?.siteTitle?.trim();
-        if (t) { document.title = t; return; }
-      }
+      if (bak) { const t = JSON.parse(bak)?.siteTitle?.trim(); if (t) { document.title = t; return; } }
     } catch {}
-    const t = state.settings.siteTitle?.trim();
+    // Final fallback — use INITIAL default (always "Bakamuna Mahasen National School")
+    const t = INITIAL.settings.siteTitle?.trim();
     if (t) document.title = t;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // mount only — localStorage read is synchronous, no dep needed
+  }, []);
 
   useEffect(() => {
     const t = state.settings.siteTitle?.trim();
     if (t) document.title = t;
-  }, [state.settings.siteTitle]); // also update when admin changes it
+  }, [state.settings.siteTitle]);
 
   // ─── Session restore on mount ────────────────────────────────────────────────
   useEffect(() => {
