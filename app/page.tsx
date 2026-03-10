@@ -157,6 +157,29 @@ const sb = {
       return arr[0]?.data ?? null;
     } catch { return null; }
   },
+
+  async saveLogo(logoUrl: string): Promise<void> {
+    if (!this.isConfigured()) return;
+    try {
+      const h = { ...this.headers(), "Prefer": "resolution=merge-duplicates" } as HeadersInit;
+      await fetch(`${SUPABASE_URL}/rest/v1/app_config`, {
+        method: "POST", headers: h,
+        body: JSON.stringify({ id: "logo", data: { logoUrl } }),
+      });
+    } catch (e) { console.warn("[sb.saveLogo]", e); }
+  },
+
+  async loadLogo(): Promise<string> {
+    if (!this.isConfigured()) return "";
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/app_config?id=eq.logo`, {
+        headers: this.headers() as HeadersInit,
+      });
+      if (!res.ok) return "";
+      const arr = await res.json();
+      return arr[0]?.data?.logoUrl ?? "";
+    } catch { return ""; }
+  },
 };
 
 // ─── DB Operations Interface (passed as prop) ─────────────────────────────────
@@ -5428,11 +5451,11 @@ function SettingsTab({state,upd,isSA,setPopup}:{state:AppState;upd:(fn:(s:AppSta
                 {state.settings.logoUrl?<img src={state.settings.logoUrl} className="w-full h-full object-cover"/>:<School size={22} className="text-white/20"/>}
               </div>
               <div className="flex-1 space-y-2">
-                <label className="flex items-center gap-2 cursor-pointer bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-400 text-xs px-3 py-2 rounded-lg transition-colors w-fit"><Upload size={12}/>Upload Image<input type="file" accept="image/*" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(!f)return;const r=new FileReader();r.onload=ev=>{const img=new (window.Image as any)();img.onload=()=>{const cv=document.createElement("canvas");const sc=Math.min(1,200/img.width);cv.width=Math.round(img.width*sc);cv.height=Math.round(img.height*sc);cv.getContext("2d")?.drawImage(img,0,0,cv.width,cv.height);const logoUrl=cv.toDataURL("image/png",0.9);try{localStorage.setItem("school_logo",logoUrl);}catch{}upd(s=>({...s,settings:{...s.settings,logoUrl}}));};img.src=ev.target?.result as string;};r.readAsDataURL(f);}}/></label>
-                <input value={state.settings.logoUrl?.startsWith("data:")?"":(state.settings.logoUrl||"")} onChange={e=>{const logoUrl=e.target.value;try{if(logoUrl)localStorage.setItem("school_logo",logoUrl);else localStorage.removeItem("school_logo");}catch{}upd(s=>({...s,settings:{...s.settings,logoUrl}}));}} placeholder="...or paste image URL" className="w-full bg-white/5 border border-white/10 text-white text-xs rounded-lg px-3 py-2 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+                <label className="flex items-center gap-2 cursor-pointer bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-400 text-xs px-3 py-2 rounded-lg transition-colors w-fit"><Upload size={12}/>Upload Image<input type="file" accept="image/*" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(!f)return;const r=new FileReader();r.onload=ev=>{const img=new (window.Image as any)();img.onload=()=>{const cv=document.createElement("canvas");const sc=Math.min(1,200/img.width);cv.width=Math.round(img.width*sc);cv.height=Math.round(img.height*sc);cv.getContext("2d")?.drawImage(img,0,0,cv.width,cv.height);const logoUrl=cv.toDataURL("image/png",0.9);try{localStorage.setItem("school_logo",logoUrl);}catch{}upd(s=>({...s,settings:{...s.settings,logoUrl}}));sb.saveLogo(logoUrl);};img.src=ev.target?.result as string;};r.readAsDataURL(f);}}/></label>
+                <input value={state.settings.logoUrl?.startsWith("data:")?"":(state.settings.logoUrl||"")} onChange={e=>{const logoUrl=e.target.value;try{if(logoUrl)localStorage.setItem("school_logo",logoUrl);else localStorage.removeItem("school_logo");}catch{}upd(s=>({...s,settings:{...s.settings,logoUrl}}));sb.saveLogo(logoUrl);}} placeholder="...or paste image URL" className="w-full bg-white/5 border border-white/10 text-white text-xs rounded-lg px-3 py-2 outline-none focus:border-blue-500/50 placeholder-white/20"/>
               </div>
             </div>
-            {state.settings.logoUrl&&<button onClick={()=>{try{localStorage.removeItem("school_logo");}catch{}upd(s=>({...s,settings:{...s.settings,logoUrl:""}}))} } className="mt-2 text-xs text-red-400/60 hover:text-red-400 transition-colors">Remove logo</button>}
+            {state.settings.logoUrl&&<button onClick={()=>{try{localStorage.removeItem("school_logo");}catch{}upd(s=>({...s,settings:{...s.settings,logoUrl:""}}));sb.saveLogo("");} } className="mt-2 text-xs text-red-400/60 hover:text-red-400 transition-colors">Remove logo</button>}
           </div>
           {!isSA&&(
             <div>
@@ -6462,7 +6485,7 @@ function PublicWebsite({state,route,setRoute,onEnterDash}:{state:AppState;route:
       <header className="sticky top-0 z-50 bg-[#0f1729]/95 backdrop-blur-md border-b border-white/10 shadow-xl shadow-black/20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
           <button onClick={()=>nav("home")} className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg overflow-hidden flex-shrink-0 bg-[#C9A84C]/20 border border-[#C9A84C]/30 flex items-center justify-center">{(siteMounted&&state.settings.logoUrl)?<img src={state.settings.logoUrl} className="w-full h-full object-contain" width={36} height={36} alt="School Logo" style={{display:"block"}}/>:<School size={17} className="text-[#C9A84C]"/>}</div>
+            <div className="w-9 h-9 rounded-lg overflow-hidden flex-shrink-0 bg-[#C9A84C]/20 border border-[#C9A84C]/30 flex items-center justify-center">{state.settings.logoUrl?<img src={state.settings.logoUrl} className="w-full h-full object-contain" width={36} height={36} alt="School Logo" style={{display:"block"}}/>:<School size={17} className="text-[#C9A84C]"/>}</div>
             <div><div className="text-white font-bold text-sm leading-tight" style={{fontFamily:"'Playfair Display',serif"}} suppressHydrationWarning>{state.settings.name}</div><div className="text-white/40 text-[10px] hidden sm:block" suppressHydrationWarning>{state.settings.tagline}</div></div>
           </button>
           {/* Desktop nav */}
@@ -6506,7 +6529,7 @@ function PublicWebsite({state,route,setRoute,onEnterDash}:{state:AppState;route:
       {/* Footer */}
       <footer className="bg-[#0f1729] text-white/50 py-12 mt-16">
         <div className="max-w-7xl mx-auto px-6 grid grid-cols-1 md:grid-cols-3 gap-8">
-          <div><div className="flex items-center gap-3 mb-3"><div className="w-8 h-8 rounded-lg bg-[#C9A84C]/20 flex items-center justify-center overflow-hidden">{(siteMounted&&state.settings.logoUrl)?<img src={state.settings.logoUrl} className="w-full h-full object-cover" width={32} height={32} alt="School Logo" style={{display:"block"}}/>:<School size={15} className="text-[#C9A84C]"/>}</div><span className="text-white font-bold" style={{fontFamily:"'Playfair Display',serif"}} suppressHydrationWarning>{state.settings.name}</span></div><p className="text-sm" suppressHydrationWarning>{state.settings.tagline}</p></div>
+          <div><div className="flex items-center gap-3 mb-3"><div className="w-8 h-8 rounded-lg bg-[#C9A84C]/20 flex items-center justify-center overflow-hidden">{state.settings.logoUrl?<img src={state.settings.logoUrl} className="w-full h-full object-cover" alt="School Logo"/>:<School size={15} className="text-[#C9A84C]"/>}</div><span className="text-white font-bold" style={{fontFamily:"'Playfair Display',serif"}} suppressHydrationWarning>{state.settings.name}</span></div><p className="text-sm" suppressHydrationWarning>{state.settings.tagline}</p></div>
           <div><h4 className="text-white font-semibold mb-3 text-sm">{T.quickLinks}</h4><div className="space-y-1.5">{PAGES.map(p=><button key={p.id} onClick={()=>nav(p.id)} className="block text-sm hover:text-[#C9A84C] transition-colors text-left">{p.label}</button>)}</div></div>
           <div><h4 className="text-white font-semibold mb-3 text-sm">{T.contact}</h4><p className="text-sm">{cms.visionMission.contact}</p><p className="text-sm mt-1">{cms.visionMission.address}</p><button onClick={onEnterDash} className="mt-3 pub-btn text-xs px-3 py-2 rounded-lg inline-flex items-center gap-1.5"><Lock size={11}/>{T.staffPortal}</button></div>
         </div>
@@ -7293,27 +7316,25 @@ export default function SchoolERP() {
     });
   };
 
-  // ─── Sync browser tab title ───────────────────────────────────────────────────
+  // ─── Sync browser tab title (runs on mount + every siteTitle change) ─────────
   useEffect(() => {
-    // Read title on mount from all possible sources, most-specific first
-    try {
-      const full = localStorage.getItem("erp_app_state");
-      if (full) { const t = JSON.parse(full)?.settings?.siteTitle?.trim(); if (t) { document.title = t; return; } }
-    } catch {}
+    // On mount: try localStorage backup first (available before state hydrates)
     try {
       const bak = localStorage.getItem("erp_settings_bak");
-      if (bak) { const t = JSON.parse(bak)?.siteTitle?.trim(); if (t) { document.title = t; return; } }
+      if (bak) {
+        const t = JSON.parse(bak)?.siteTitle?.trim();
+        if (t) { document.title = t; return; }
+      }
     } catch {}
-    // Final fallback — use INITIAL default (always "Bakamuna Mahasen National School")
-    const t = INITIAL.settings.siteTitle?.trim();
+    const t = state.settings.siteTitle?.trim();
     if (t) document.title = t;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, []); // mount only — localStorage read is synchronous, no dep needed
 
   useEffect(() => {
     const t = state.settings.siteTitle?.trim();
     if (t) document.title = t;
-  }, [state.settings.siteTitle]);
+  }, [state.settings.siteTitle]); // also update when admin changes it
 
   // ─── Session restore on mount ────────────────────────────────────────────────
   useEffect(() => {
@@ -7346,7 +7367,8 @@ export default function SchoolERP() {
       sb.select<any>("counseling_profiles"),
       sb.loadConfig(),
       sb.loadCms(),
-    ]).then(([students, teachers, items, labs, fees, behavior, counseling, config, cmsDb]) => {
+      sb.loadLogo(),
+    ]).then(([students, teachers, items, labs, fees, behavior, counseling, config, cmsDb, logoDb]) => {
       update(prev => ({
         ...prev,
         subjects:    config?.subjects  ?? prev.subjects,
@@ -7358,7 +7380,7 @@ export default function SchoolERP() {
         settings:  config?.settings  ? {
           ...prev.settings,
           ...config.settings,
-          logoUrl:      prev.settings.logoUrl,       // logo is local-only (stripped from config)
+          logoUrl:      (logoDb && typeof logoDb === 'string' && logoDb) ? logoDb : (prev.settings.logoUrl || ""),  // prefer Supabase logo
           pwAdmin:      prev.settings.pwAdmin,       // passwords are local-only
           pwCounselor:  prev.settings.pwCounselor,
           pwStaff:      prev.settings.pwStaff,
