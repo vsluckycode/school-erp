@@ -6462,8 +6462,8 @@ function PublicWebsite({state,route,setRoute,onEnterDash}:{state:AppState;route:
       <header className="sticky top-0 z-50 bg-[#0f1729]/95 backdrop-blur-md border-b border-white/10 shadow-xl shadow-black/20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
           <button onClick={()=>nav("home")} className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg overflow-hidden flex-shrink-0 bg-[#C9A84C]/20 border border-[#C9A84C]/30 flex items-center justify-center">{(siteMounted&&state.settings.logoUrl)?<img src={state.settings.logoUrl} className="w-full h-full object-cover"/>:<School size={17} className="text-[#C9A84C]"/>}</div>
-            <div className="hidden sm:block"><div className="text-white font-bold text-sm leading-tight" style={{fontFamily:"'Playfair Display',serif"}} suppressHydrationWarning>{state.settings.name}</div><div className="text-white/40 text-[10px]" suppressHydrationWarning>{state.settings.tagline}</div></div>
+            <div className="w-9 h-9 rounded-lg overflow-hidden flex-shrink-0 bg-[#C9A84C]/20 border border-[#C9A84C]/30 flex items-center justify-center">{(siteMounted&&state.settings.logoUrl)?<img src={state.settings.logoUrl} className="w-full h-full object-contain" width={36} height={36} alt="School Logo" style={{display:"block"}}/>:<School size={17} className="text-[#C9A84C]"/>}</div>
+            <div><div className="text-white font-bold text-sm leading-tight" style={{fontFamily:"'Playfair Display',serif"}} suppressHydrationWarning>{state.settings.name}</div><div className="text-white/40 text-[10px] hidden sm:block" suppressHydrationWarning>{state.settings.tagline}</div></div>
           </button>
           {/* Desktop nav */}
           <nav className="hidden md:flex items-center gap-1">
@@ -6506,7 +6506,7 @@ function PublicWebsite({state,route,setRoute,onEnterDash}:{state:AppState;route:
       {/* Footer */}
       <footer className="bg-[#0f1729] text-white/50 py-12 mt-16">
         <div className="max-w-7xl mx-auto px-6 grid grid-cols-1 md:grid-cols-3 gap-8">
-          <div><div className="flex items-center gap-3 mb-3"><div className="w-8 h-8 rounded-lg bg-[#C9A84C]/20 flex items-center justify-center overflow-hidden">{(siteMounted&&state.settings.logoUrl)?<img src={state.settings.logoUrl} className="w-full h-full object-cover"/>:<School size={15} className="text-[#C9A84C]"/>}</div><span className="text-white font-bold" style={{fontFamily:"'Playfair Display',serif"}} suppressHydrationWarning>{state.settings.name}</span></div><p className="text-sm" suppressHydrationWarning>{state.settings.tagline}</p></div>
+          <div><div className="flex items-center gap-3 mb-3"><div className="w-8 h-8 rounded-lg bg-[#C9A84C]/20 flex items-center justify-center overflow-hidden">{(siteMounted&&state.settings.logoUrl)?<img src={state.settings.logoUrl} className="w-full h-full object-cover" width={32} height={32} alt="School Logo" style={{display:"block"}}/>:<School size={15} className="text-[#C9A84C]"/>}</div><span className="text-white font-bold" style={{fontFamily:"'Playfair Display',serif"}} suppressHydrationWarning>{state.settings.name}</span></div><p className="text-sm" suppressHydrationWarning>{state.settings.tagline}</p></div>
           <div><h4 className="text-white font-semibold mb-3 text-sm">{T.quickLinks}</h4><div className="space-y-1.5">{PAGES.map(p=><button key={p.id} onClick={()=>nav(p.id)} className="block text-sm hover:text-[#C9A84C] transition-colors text-left">{p.label}</button>)}</div></div>
           <div><h4 className="text-white font-semibold mb-3 text-sm">{T.contact}</h4><p className="text-sm">{cms.visionMission.contact}</p><p className="text-sm mt-1">{cms.visionMission.address}</p><button onClick={onEnterDash} className="mt-3 pub-btn text-xs px-3 py-2 rounded-lg inline-flex items-center gap-1.5"><Lock size={11}/>{T.staffPortal}</button></div>
         </div>
@@ -7293,11 +7293,25 @@ export default function SchoolERP() {
     });
   };
 
-  // ─── Sync browser tab title ─────────────────────────────────────────────────
+  // ─── Sync browser tab title (runs on mount + every siteTitle change) ─────────
+  useEffect(() => {
+    // On mount: try localStorage backup first (available before state hydrates)
+    try {
+      const bak = localStorage.getItem("erp_settings_bak");
+      if (bak) {
+        const t = JSON.parse(bak)?.siteTitle?.trim();
+        if (t) { document.title = t; return; }
+      }
+    } catch {}
+    const t = state.settings.siteTitle?.trim();
+    if (t) document.title = t;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // mount only — localStorage read is synchronous, no dep needed
+
   useEffect(() => {
     const t = state.settings.siteTitle?.trim();
     if (t) document.title = t;
-  }, [state.settings.siteTitle]);
+  }, [state.settings.siteTitle]); // also update when admin changes it
 
   // ─── Session restore on mount ────────────────────────────────────────────────
   useEffect(() => {
