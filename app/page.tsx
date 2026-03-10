@@ -7380,7 +7380,7 @@ export default function SchoolERP() {
         settings:  config?.settings  ? {
           ...prev.settings,
           ...config.settings,
-          logoUrl:      (logoDb && typeof logoDb === 'string' && logoDb) ? logoDb : (prev.settings.logoUrl || ""),  // prefer Supabase logo
+          logoUrl:      (logoDb && (logoDb as string).length > 0) ? (logoDb as string) : (prev.settings.logoUrl || ""),  // prefer Supabase logo
           pwAdmin:      prev.settings.pwAdmin,       // passwords are local-only
           pwCounselor:  prev.settings.pwCounselor,
           pwStaff:      prev.settings.pwStaff,
