@@ -9,7 +9,7 @@ import {
   Upload, UserPlus, Phone, Printer,
   Globe, Image, Newspaper, Star, Users2, MapPin, Calendar, Tag, Edit2, ExternalLink, ChevronLeft, ChevronDown, PlayCircle,
   HeartHandshake, DollarSign, Package, KeyRound, CreditCard, Boxes, ClipboardList, AlertTriangle, Database, Wifi, WifiOff,
-  Menu, ClipboardCheck, Camera, LayoutDashboard, FolderOpen, Layers
+  Menu, ClipboardCheck, Camera, LayoutDashboard, FolderOpen, Layers, Pencil
 } from "lucide-react";
 
 // ─── Supabase Client ──────────────────────────────────────────────────────────
@@ -20,7 +20,8 @@ import {
 // Run this SQL in your Supabase SQL editor (Dashboard → SQL Editor → New Query):
 //
 // create table if not exists app_config (id text primary key, data jsonb);
-// create table if not exists subjects (id text primary key, name text, code text, class_ids jsonb default '[]', teacher_id text);
+// create table if not exists subjects (id text primary key, name text, code text, class_ids jsonb default '[]', teacher_ids jsonb default '[]');
+// -- Migration: alter table subjects add column if not exists teacher_ids jsonb default '[]';
 // create table if not exists classes (id text primary key, name text, section text, teacher_id text);
 // create table if not exists timetable (id text primary key, class_id text, day text, period int, subject_id text, teacher_id text);
 //
@@ -133,6 +134,29 @@ const sb = {
       return arr[0]?.data ?? null;
     } catch { return null; }
   },
+
+  async saveCms(cms: object): Promise<void> {
+    if (!this.isConfigured()) return;
+    try {
+      const h = { ...this.headers(), "Prefer": "resolution=merge-duplicates" } as HeadersInit;
+      await fetch(`${SUPABASE_URL}/rest/v1/app_config`, {
+        method: "POST", headers: h,
+        body: JSON.stringify({ id: "cms", data: cms }),
+      });
+    } catch (e) { console.warn("[sb.saveCms]", e); }
+  },
+
+  async loadCms(): Promise<any | null> {
+    if (!this.isConfigured()) return null;
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/app_config?id=eq.cms`, {
+        headers: this.headers() as HeadersInit,
+      });
+      if (!res.ok) return null;
+      const arr = await res.json();
+      return arr[0]?.data ?? null;
+    } catch { return null; }
+  },
 };
 
 // ─── DB Operations Interface (passed as prop) ─────────────────────────────────
@@ -179,10 +203,10 @@ interface Student { id:string; name:string; rollNo:string; classId:string; photo
 // PHASE 2: is_counselor, is_bursar roles on Teacher
 interface Teacher { id:string; name:string; email:string; subjectIds:string[]; classIds:string[]; password:string; photo?:string; profile?:TeacherProfile; status?:"pending"|"approved"; is_counselor?:boolean; is_bursar?:boolean; }
 // PHASE 1: category on Subject
-interface Subject { id:string; name:string; code:string; classIds:string[]; teacherId:string; category?:SubjectCategory; }
+interface Subject { id:string; name:string; code:string; classIds:string[]; teacherIds:string[]; category?:SubjectCategory; }
 interface Class   { id:string; name:string; section:string; teacherId:string }
 interface TimetableSlot { day:string; period:number; subjectId:string; teacherId:string }
-interface SchoolSettings { name:string; tagline:string; logoUrl:string; blogUrl:string; currency:string; pwAdmin:string; pwCounselor:string; pwStaff:string; }
+interface SchoolSettings { name:string; tagline:string; logoUrl:string; blogUrl:string; currency:string; pwAdmin:string; pwCounselor:string; pwStaff:string; pwExam:string; }
 interface SupportAdmin   { id:string; name:string; email:string; password:string; }
 
 // ─── CMS / Public Website Types ──────────────────────────────────────────────
@@ -191,13 +215,14 @@ interface GalleryItem  { id:string; imageUrl:string; caption:string; category:st
 interface NewsPost     { id:string; title:string; body:string; imageUrl:string; category:"news"|"blog"|"circular"; date:string; author:string; pinned?:boolean; }
 interface Achievement  { id:string; title:string; description:string; imageUrl:string; category:"academic"|"sports"|"aesthetic"; year:string; }
 interface Club         { id:string; name:string; description:string; imageUrl:string; teacher:string; members:number; badge:string; }
-interface MediaFile    { id:string; name:string; url:string; type:"image"|"pdf"; size:string; uploadedAt:string; category?:string; classId?:string; subjectId?:string; className?:string; subjectName?:string; }
+interface MediaFile    { id:string; name:string; url:string; type:"image"|"pdf"; size:string; uploadedAt:string; source?:"download"|"gallery"|"cms"; category?:string; classId?:string; subjectId?:string; className?:string; subjectName?:string; }
 interface DownloadCategory { id:string; name:string; icon:string; }
 interface PrincipalMsg { text:string; name:string; title:string; photo:string; }
 interface VisionMission{ vision:string; mission:string; history:string; contact:string; address:string; mapEmbed:string; }
 
-type StaffRole = "principal" | "deputy_principal" | "assistant_principal" | "sectional_head" | "teacher";
-interface StaffMember { id:string; name:string; designation:string; role:StaffRole; department?:string; photo:string; }
+type StaffRole = "principal" | "deputy_principal" | "assistant_principal" | "sectional_head" | "grade_head" | "subject_head" | "class_teacher" | "teacher";
+type StaffType = "academic" | "non_academic";
+interface StaffMember { id:string; name:string; designation:string; role:StaffRole; department?:string; photo:string; extraInfo?:string; staffType?:StaffType; }
 
 interface CMS {
   slides:SliderSlide[];
@@ -265,7 +290,7 @@ const ENC_KEY = "NEXUS_ERP_2026";
 function encPII(v:string):string { if(!v) return ""; try { return btoa(unescape(encodeURIComponent(v.split("").map((c,i)=>String.fromCharCode(c.charCodeAt(0)^ENC_KEY.charCodeAt(i%ENC_KEY.length))).join("")))); } catch { return btoa(v); } }
 function decPII(v:string):string { if(!v) return ""; try { return decodeURIComponent(escape(atob(v))).split("").map((c,i)=>String.fromCharCode(c.charCodeAt(0)^ENC_KEY.charCodeAt(i%ENC_KEY.length))).join(""); } catch { return atob(v); } }
 function encProfile<T extends Record<string,any>>(p:T):T { const o:any={}; Object.entries(p).forEach(([k,v])=>{o[k]=v?encPII(String(v)):v;}); return o as T; }
-function decProfile<T extends Record<string,any>>(p?:T):T { if(!p) return {} as T; const o:any={}; Object.entries(p).forEach(([k,v])=>{o[k]=v?decPII(String(v)):v;}); return o as T; }
+function decProfile<T extends Record<string,any>>(p?:T|string):T { if(!p) return {} as T; const obj:any=typeof p==="string"?(() => { try { return JSON.parse(p); } catch { return {}; } })():p; const o:any={}; Object.entries(obj).forEach(([k,v])=>{o[k]=v?decPII(String(v)):v;}); return o as T; }
 
 // ─── CSV Parser ────────────────────────────────────────────────────────────────
 function parseCSV(text:string):Record<string,string>[] {
@@ -300,16 +325,16 @@ const saveLogo = (url: string) => {
 const BLOOD_GROUPS = ["A+","A-","B+","B-","AB+","AB-","O+","O-"];
 
 const INITIAL: AppState = {
-  settings: { name:"Nexus Academy", tagline:"Excellence in Education", logoUrl:getSavedLogo(), blogUrl:"https://nexusacademy.edu.lk/blog", currency:"LKR", pwAdmin:"admin123", pwCounselor:"couns789", pwStaff:"staff456" },
+  settings: { name:"Nexus Academy", tagline:"Excellence in Education", logoUrl:getSavedLogo(), blogUrl:"https://nexusacademy.edu.lk/blog", currency:"LKR", pwAdmin:"admin123", pwCounselor:"couns789", pwStaff:"staff456", pwExam:"exam123" },
   classes: [
     { id:"c1", name:"9",  section:"A", teacherId:"t1" },
     { id:"c2", name:"10", section:"B", teacherId:"t2" },
   ],
   subjects: [
-    { id:"s1", name:"Mathematics", code:"MTH", classIds:["c1","c2"], teacherId:"t1", category:"Science" as SubjectCategory },
-    { id:"s2", name:"Physics",     code:"PHY", classIds:["c1"],       teacherId:"t2", category:"Science" as SubjectCategory },
-    { id:"s3", name:"Chemistry",   code:"CHM", classIds:["c2"],       teacherId:"t2", category:"Science" as SubjectCategory },
-    { id:"s4", name:"English",     code:"ENG", classIds:["c1","c2"], teacherId:"t1", category:"Arts" as SubjectCategory },
+    { id:"s1", name:"Mathematics", code:"MTH", classIds:["c1","c2"], teacherIds:["t1"], category:"Science" as SubjectCategory },
+    { id:"s2", name:"Physics",     code:"PHY", classIds:["c1"],       teacherIds:["t2"], category:"Science" as SubjectCategory },
+    { id:"s3", name:"Chemistry",   code:"CHM", classIds:["c2"],       teacherIds:["t2"], category:"Science" as SubjectCategory },
+    { id:"s4", name:"English",     code:"ENG", classIds:["c1","c2"], teacherIds:["t1"], category:"Arts" as SubjectCategory },
   ],
   teachers: [
     { id:"t1", name:"Dr. Arjun Mehta",  email:"arjun@nexus.edu",  subjectIds:["s1","s4"], classIds:["c1","c2"], password:"teacher123", is_counselor:false, is_bursar:false,
@@ -466,6 +491,27 @@ const INITIAL: AppState = {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const uid   = () => Math.random().toString(36).slice(2, 9);
 
+// Sort classes numerically by name then alphabetically by section (e.g. 7A, 7B, 8A, 9A)
+function sortClasses<T extends{name:string;section:string}>(arr:T[]):T[]{
+  return [...arr].sort((a,b)=>{
+    const na=parseInt(a.name)||0, nb=parseInt(b.name)||0;
+    if(na!==nb) return na-nb;
+    return a.name.localeCompare(b.name)||a.section.localeCompare(b.section);
+  });
+}
+// Sort students: by class order first, then roll number numerically
+function sortStudents(students:Student[],classes:Class[]):Student[]{
+  const sorted=sortClasses(classes);
+  const order=Object.fromEntries(sorted.map((c,i)=>[c.id,i]));
+  return [...students].sort((a,b)=>{
+    const co=(order[a.classId]??99)-(order[b.classId]??99);
+    if(co!==0) return co;
+    const ra=parseInt(a.rollNo)||0, rb=parseInt(b.rollNo)||0;
+    if(ra!==rb) return ra-rb;
+    return a.rollNo.localeCompare(b.rollNo);
+  });
+}
+
 // ─── Audio Beep Utility ───────────────────────────────────────────────────────
 function playBeep(type:"success"|"error"|"duplicate"){
   try{
@@ -540,6 +586,8 @@ function gradeBg(g:Grade){
   return{S:"bg-emerald-500/20 border-emerald-500/30",A:"bg-blue-500/20 border-blue-500/30",B:"bg-yellow-500/20 border-yellow-500/30",C:"bg-orange-500/20 border-orange-500/30",W:"bg-red-500/20 border-red-500/30","-":"bg-white/5 border-white/10"}[g];
 }
 function gradeLabel(g:Grade){ return{A:"Excellent",B:"Good",C:"Average",S:"Simple Pass",W:"Fail","-":"–"}[g]; }
+function calcGPA(avg:number):number{ if(avg>=75)return 4.0; if(avg>=65)return 3.0; if(avg>=55)return 2.0; if(avg>=35)return 1.0; return 0.0; }
+function gpaColor(gpa:number):string{ if(gpa>=4.0)return "text-blue-400"; if(gpa>=3.0)return "text-yellow-400"; if(gpa>=2.0)return "text-orange-400"; if(gpa>=1.0)return "text-emerald-400"; return "text-red-400"; }
 
 // ─── Grade Key Component — PHASE 5 updated thresholds ────────────────────────
 function GradeKey() {
@@ -741,133 +789,194 @@ function StudentIDCard({student,cls,schoolName,schoolTagline,logoUrl,onClose}:{s
   const qrData  = encodeURIComponent(`STUDENT:${student.rollNo}:${student.name}`);
   const qrUrl   = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${qrData}&bgcolor=0d1117&color=60a5fa&margin=8`;
   const d       = decProfile(student.profile);
-  const bloodGroup   = d.bloodGroup  || "—";
-  const phone        = d.phone       || "";
-  const address      = d.address     || "";
-  const parentName   = d.parentName  || "";
+  const bloodGroup   = d.bloodGroup   || "—";
+  const phone        = d.phone        || "";
+  const parentPhone  = d.parentPhone  || "";
+  const displayPhone = parentPhone || phone;   // prefer parent phone
+  const address      = d.address      || "";
+  const parentName   = d.parentName   || "";
 
-  function downloadCard(){
-    const card=cardRef.current;
-    if(!card) return;
-    const html=`<!DOCTYPE html><html><head><style>
-      *{margin:0;padding:0;box-sizing:border-box}
-      body{background:#0d1117;display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:'Segoe UI',sans-serif}
-      .card{width:360px;background:linear-gradient(135deg,#0f1729 0%,#111827 50%,#0d1b2a 100%);border:1px solid rgba(59,130,246,0.3);border-radius:16px;overflow:hidden;color:white}
-      .top{background:linear-gradient(135deg,#1e3a5f,#1e40af);padding:14px 16px;display:flex;align-items:center;gap:12px}
-      .top .school-name{font-size:14px;font-weight:700;color:white}
-      .top .school-tag{font-size:10px;color:rgba(255,255,255,0.6);margin-top:2px}
-      .body{padding:16px;display:flex;gap:14px;align-items:flex-start}
-      .photo{width:82px;height:90px;border-radius:10px;border:2px solid rgba(59,130,246,0.5);flex-shrink:0;object-fit:cover}
-      .info{flex:1}
-      .name{font-size:15px;font-weight:700;color:white;margin-bottom:2px}
-      .roll{font-size:11px;color:#60a5fa;font-family:monospace;margin-bottom:7px}
-      .row{display:flex;justify-content:space-between;font-size:10.5px;color:rgba(255,255,255,0.45);margin-bottom:3px}
-      .row span{color:rgba(255,255,255,0.88);font-weight:500;text-align:right;max-width:160px}
-      .divider{border:none;border-top:1px solid rgba(255,255,255,0.07);margin:10px 16px}
-      .contact{padding:0 16px 10px}
-      .contact-row{display:flex;gap:6px;font-size:10px;color:rgba(255,255,255,0.45);margin-bottom:4px;align-items:flex-start}
-      .contact-row span{color:rgba(255,255,255,0.8);font-weight:500}
-      .bottom{padding:10px 16px;display:flex;align-items:center;justify-content:space-between;border-top:1px solid rgba(255,255,255,0.08)}
-      .badge{background:rgba(59,130,246,0.15);border:1px solid rgba(59,130,246,0.3);border-radius:8px;padding:6px 12px;text-align:center}
-      .badge .label{font-size:9px;color:#60a5fa;text-transform:uppercase;letter-spacing:1px}
-      .badge .val{font-size:13px;font-weight:700;color:white;margin-top:2px;font-family:monospace}
-      @media print{body{min-height:0}@page{size:360px 290px;margin:0}}
-    </style></head><body>
-    <div class="card">
-      <div class="top">
-        ${logoUrl?`<img src="${logoUrl}" style="width:36px;height:36px;border-radius:8px;object-fit:cover;flex-shrink:0"/>`:`<div style="width:36px;height:36px;background:rgba(255,255,255,0.15);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">🏫</div>`}
+  const NEW_CARD_CSS=`
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#e5e7eb;font-family:'Segoe UI',Arial,sans-serif;padding:12px}
+  .page-grid{
+    display:grid;
+    grid-template-columns:repeat(2,85.6mm);
+    gap:5mm;
+    justify-content:center;
+  }
+  .card{
+    width:85.6mm;height:54mm;
+    background:#ffffff;
+    border:0.5px solid #cbd5e1;
+    border-radius:3mm;
+    overflow:hidden;
+    position:relative;
+    font-family:'Segoe UI',Arial,sans-serif;
+    box-shadow:0 1px 4px rgba(0,0,0,0.12);
+  }
+  .card-top{
+    background:linear-gradient(135deg,#1e3a8a 0%,#1d4ed8 100%);
+    padding:1.8mm 2.5mm 1.8mm 2.5mm;
+    display:flex;align-items:center;gap:2mm;
+    height:13mm;
+  }
+  .logo{width:8mm;height:8mm;border-radius:1mm;object-fit:cover;flex-shrink:0;background:#fff}
+  .logo-placeholder{width:8mm;height:8mm;border-radius:1mm;background:rgba(255,255,255,0.2);display:flex;align-items:center;justify-content:center;font-size:5mm;flex-shrink:0}
+  .school-name{font-size:5.5px;font-weight:800;color:#ffffff;line-height:1.2;text-transform:uppercase;letter-spacing:0.3px}
+  .school-tag{font-size:4px;color:rgba(255,255,255,0.75);margin-top:0.5mm;letter-spacing:0.2px}
+  .card-body{display:flex;gap:2mm;padding:1.8mm 2.5mm;height:29.5mm;align-items:flex-start}
+  .photo{width:15mm;height:19mm;border-radius:1.5mm;border:0.5px solid #bfdbfe;object-fit:cover;flex-shrink:0}
+  .info{flex:1;min-width:0}
+  .student-name{font-size:6.5px;font-weight:800;color:#0f172a;margin-bottom:0.8mm;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .roll-no{font-size:5px;color:#1d4ed8;font-family:monospace;font-weight:700;margin-bottom:1.2mm;letter-spacing:0.3px}
+  .detail-row{display:flex;justify-content:space-between;font-size:4.8px;margin-bottom:0.7mm;gap:1mm}
+  .detail-label{color:#64748b;font-weight:600;flex-shrink:0}
+  .detail-val{color:#0f172a;font-weight:700;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .divider{border:none;border-top:0.3px solid #e2e8f0;margin:0 2.5mm}
+  .card-contact{padding:1mm 2.5mm;display:flex;flex-direction:column;gap:0.5mm}
+  .contact-row{display:flex;gap:1mm;font-size:4.5px;align-items:flex-start;color:#334155}
+  .contact-label{color:#64748b;font-weight:600;flex-shrink:0;min-width:7mm}
+  .contact-val{color:#0f172a;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .card-footer{
+    position:absolute;bottom:0;left:0;right:0;
+    height:11.5mm;
+    background:linear-gradient(135deg,#f8fafc,#f1f5f9);
+    border-top:0.4px solid #e2e8f0;
+    padding:1mm 2.5mm;
+    display:flex;align-items:center;justify-content:space-between;
+  }
+  .id-badge{background:#1e3a8a;border-radius:1mm;padding:0.8mm 2mm;text-align:center}
+  .id-badge-label{font-size:3.5px;color:rgba(255,255,255,0.7);text-transform:uppercase;letter-spacing:0.5px}
+  .id-badge-val{font-size:5.5px;font-weight:800;color:#ffffff;font-family:monospace;margin-top:0.3mm;letter-spacing:0.5px}
+  .qr-img{width:9mm;height:9mm;border-radius:0.8mm;border:0.4px solid #cbd5e1}
+  @media print{
+    body{background:white;padding:6mm}
+    .page-grid{gap:4mm}
+    .card{box-shadow:none;border:0.4px solid #94a3b8}
+    @page{size:A4 portrait;margin:8mm}
+  }
+`;
+
+  function buildCardHtml(st:Student,clsInfo?:{name:string;section:string},prof?:ReturnType<typeof decProfile>):string{
+    const p=prof||decProfile(st.profile);
+    const qr=encodeURIComponent(`STUDENT:${st.rollNo}:${st.name}`);
+    const qrSrc=`https://api.qrserver.com/v1/create-qr-code/?size=90x90&data=${qr}&bgcolor=ffffff&color=000000&margin=4`;
+    const classStr=clsInfo?clsInfo.name+"-"+clsInfo.section:"—";
+    const logo=logoUrl?`<img src="${logoUrl}" class="logo"/>`:`<div class="logo-placeholder">🏫</div>`;
+    return`<div class="card">
+      <div class="card-top">
+        ${logo}
         <div><div class="school-name">${schoolName}</div><div class="school-tag">${schoolTagline}</div></div>
       </div>
-      <div class="body">
-        <img src="${student.photo}" class="photo"/>
+      <div class="card-body">
+        <img src="${st.photo}" class="photo" onerror="this.src='https://api.dicebear.com/7.x/avataaars/svg?seed=fallback'"/>
         <div class="info">
-          <div class="name">${student.name}</div>
-          <div class="roll">Roll No: ${student.rollNo}</div>
-          <div class="row">Class <span>${cls?cls.name+"-"+cls.section:"—"}</span></div>
-          <div class="row">Blood Group <span>${bloodGroup}</span></div>
-          <div class="row">Academic Year <span>${new Date().getFullYear()}</span></div>
+          <div class="student-name">${st.name}</div>
+          <div class="roll-no">ID: ${st.rollNo}</div>
+          <div class="detail-row"><span class="detail-label">Class</span><span class="detail-val">${classStr}</span></div>
+          <div class="detail-row"><span class="detail-label">Blood</span><span class="detail-val">${p.bloodGroup||"—"}</span></div>
+          <div class="detail-row"><span class="detail-label">Year</span><span class="detail-val">${new Date().getFullYear()}</span></div>
+          ${p.parentName?`<div class="detail-row"><span class="detail-label">Guardian</span><span class="detail-val">${p.parentName}</span></div>`:""}
         </div>
       </div>
-      <hr class="divider"/>
-      <div class="contact">
-        ${parentName?`<div class="contact-row">👤 Custodian &nbsp;<span>${parentName}</span></div>`:""}
-        ${phone?`<div class="contact-row">📞 Phone &nbsp;<span>${phone}</span></div>`:""}
-        ${address?`<div class="contact-row">📍 Address &nbsp;<span>${address}</span></div>`:""}
+      ${(p.parentPhone||p.phone||p.address)?`<hr class="divider"/><div class="card-contact">
+        ${(p.parentPhone||p.phone)?`<div class="contact-row"><span class="contact-label">${p.parentPhone?"Parent":"Phone"}</span><span class="contact-val">${p.parentPhone||p.phone}</span></div>`:""}
+        ${p.address?`<div class="contact-row"><span class="contact-label">Address</span><span class="contact-val">${p.address}</span></div>`:""}
+      </div>`:""}
+      <div class="card-footer">
+        <div class="id-badge"><div class="id-badge-label">Student ID</div><div class="id-badge-val">${st.rollNo}</div></div>
+        <img src="${qrSrc}" class="qr-img"/>
       </div>
-      <div class="bottom">
-        <div class="badge"><div class="label">Student ID</div><div class="val">${student.rollNo}</div></div>
-        <img src="${qrUrl}" width="78" height="78" style="border-radius:8px"/>
-      </div>
-    </div>
-    </body></html>`;
-    const w=window.open("","_blank","width=420,height=360");
+    </div>`;
+  }
+
+  function downloadCard(){
+    const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><style>${NEW_CARD_CSS}
+      body{display:flex;align-items:center;justify-content:center;min-height:100vh}
+      .page-grid{grid-template-columns:85.6mm}
+      @media print{body{min-height:0;padding:0}@page{size:90mm 58mm;margin:2mm}}
+    </style></head><body><div class="page-grid">${buildCardHtml(student,cls,{bloodGroup,phone,address,parentName,dob:d.dob,gender:d.gender,parentPhone:d.parentPhone,nic:d.nic})}</div></body></html>`;
+    const w=window.open("","_blank","width=500,height=400");
     if(!w) return;
     w.document.write(html);
     w.document.close();
-    w.onload=()=>{w.print();};
+    w.onload=()=>setTimeout(()=>w.print(),300);
   }
 
+  // Render at 2× pixel density for sharp readable preview, then scale(0.5) to ATM display size
+  // Physical ATM: 85.6×54mm. Preview container: 430×272px (nice readable size ~1.33× ATM)
+  const CARD_W=646, CARD_H=408;          // render size (2× physical px)
+  const DISP_W=430, DISP_H=272;          // display size (shown to user)
+  const SCALE=DISP_W/CARD_W;             // 0.6657 — bigger than 0.5, still sharp
+  const qrPreviewUrl=`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${qrData}&bgcolor=ffffff&color=000000&margin=6`;
   return(
     <div className="flex flex-col items-center gap-4" style={{animation:"fadeUp 0.3s ease"}}>
-      {/* Live preview card */}
-      <div ref={cardRef} style={{width:360,background:"linear-gradient(135deg,#0f1729 0%,#111827 50%,#0d1b2a 100%)",border:"1px solid rgba(59,130,246,0.3)",borderRadius:16,overflow:"hidden",fontFamily:"system-ui,sans-serif"}}>
-        {/* Header */}
-        <div style={{background:"linear-gradient(135deg,#1e3a5f,#1e40af)",padding:"14px 16px",display:"flex",alignItems:"center",gap:12}}>
-          {logoUrl?<img src={logoUrl} style={{width:36,height:36,borderRadius:8,objectFit:"cover",flexShrink:0}}/>:<div style={{width:36,height:36,background:"rgba(255,255,255,0.15)",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>🏫</div>}
-          <div><div style={{fontSize:14,fontWeight:700,color:"#fff"}}>{schoolName}</div><div style={{fontSize:10,color:"rgba(255,255,255,0.6)",marginTop:2}}>{schoolTagline}</div></div>
-        </div>
-        {/* Body */}
-        <div style={{padding:"16px",display:"flex",gap:14,alignItems:"flex-start"}}>
-          <img src={student.photo} alt="" style={{width:82,height:90,borderRadius:10,border:"2px solid rgba(59,130,246,0.5)",objectFit:"cover",flexShrink:0}}/>
-          <div style={{flex:1}}>
-            <div style={{fontSize:15,fontWeight:700,color:"#fff",marginBottom:2}}>{student.name}</div>
-            <div style={{fontSize:11,color:"#60a5fa",fontFamily:"monospace",marginBottom:7}}>Roll No: {student.rollNo}</div>
-            {[["Class",cls?cls.name+"-"+cls.section:"—"],["Blood Group",bloodGroup],["Year",String(new Date().getFullYear())]].map(([k,v])=>(
-              <div key={k} style={{display:"flex",justifyContent:"space-between",fontSize:10.5,marginBottom:3}}>
-                <span style={{color:"rgba(255,255,255,0.45)"}}>{k}</span>
-                <span style={{color:"rgba(255,255,255,0.9)",fontWeight:500}}>{v}</span>
+      {/* Live preview — white ATM card, rendered 2× then scaled down */}
+      <div style={{background:"#d1d5db",padding:16,borderRadius:14,boxShadow:"inset 0 2px 8px rgba(0,0,0,0.15)"}}>
+        {/* Clipping wrapper — exact display size */}
+        <div style={{width:DISP_W,height:DISP_H,overflow:"hidden",borderRadius:Math.round(11*SCALE),boxShadow:"0 4px 24px rgba(0,0,0,0.25)"}}>
+          {/* The card itself rendered at 2× */}
+          <div ref={cardRef} style={{width:CARD_W,height:CARD_H,background:"#ffffff",fontFamily:"'Segoe UI',Arial,sans-serif",position:"relative",display:"flex",flexDirection:"column",transform:`scale(${SCALE})`,transformOrigin:"top left"}}>
+            {/* ── Top bar ── */}
+            <div style={{background:"linear-gradient(135deg,#1e3a8a 0%,#2563eb 100%)",padding:"0 18px",display:"flex",alignItems:"center",gap:14,height:96,flexShrink:0}}>
+              {logoUrl
+                ? <img src={logoUrl} style={{width:60,height:60,borderRadius:8,objectFit:"cover",flexShrink:0,border:"2px solid rgba(255,255,255,0.3)"}}/>
+                : <div style={{width:60,height:60,borderRadius:8,background:"rgba(255,255,255,0.15)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:32,flexShrink:0}}>🏫</div>}
+              <div>
+                <div style={{fontSize:16,fontWeight:900,color:"#fff",textTransform:"uppercase",letterSpacing:1.5,lineHeight:1.2}}>{schoolName}</div>
+                <div style={{fontSize:11,color:"rgba(255,255,255,0.75)",marginTop:4,letterSpacing:0.5}}>{schoolTagline}</div>
               </div>
-            ))}
-          </div>
-        </div>
-        {/* Contact info section */}
-        {(parentName||phone||address)&&(
-          <>
-            <div style={{borderTop:"1px solid rgba(255,255,255,0.07)",margin:"0 16px"}}/>
-            <div style={{padding:"10px 16px"}}>
-              {parentName&&<div style={{display:"flex",gap:6,fontSize:10.5,marginBottom:4,alignItems:"flex-start"}}>
-                <span style={{color:"rgba(255,255,255,0.4)",flexShrink:0}}>Custodian</span>
-                <span style={{color:"rgba(255,255,255,0.85)",fontWeight:500,marginLeft:"auto",textAlign:"right"}}>{parentName}</span>
-              </div>}
-              {phone&&<div style={{display:"flex",gap:6,fontSize:10.5,marginBottom:4,alignItems:"flex-start"}}>
-                <span style={{color:"rgba(255,255,255,0.4)",flexShrink:0}}>Phone</span>
-                <span style={{color:"rgba(255,255,255,0.85)",fontWeight:500,marginLeft:"auto",fontFamily:"monospace"}}>{phone}</span>
-              </div>}
-              {address&&<div style={{display:"flex",gap:6,fontSize:10.5,alignItems:"flex-start"}}>
-                <span style={{color:"rgba(255,255,255,0.4)",flexShrink:0}}>Address</span>
-                <span style={{color:"rgba(255,255,255,0.85)",fontWeight:500,marginLeft:"auto",textAlign:"right",maxWidth:220}}>{address}</span>
-              </div>}
             </div>
-          </>
-        )}
-        {/* Footer */}
-        <div style={{padding:"10px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",borderTop:"1px solid rgba(255,255,255,0.08)"}}>
-          <div style={{background:"rgba(59,130,246,0.12)",border:"1px solid rgba(59,130,246,0.3)",borderRadius:8,padding:"6px 14px",textAlign:"center"}}>
-            <div style={{fontSize:9,color:"#60a5fa",textTransform:"uppercase",letterSpacing:1}}>Student ID</div>
-            <div style={{fontSize:15,fontWeight:700,color:"#fff",marginTop:2,fontFamily:"monospace"}}>{student.rollNo}</div>
+            {/* ── Body ── */}
+            <div style={{display:"flex",gap:14,padding:"12px 18px 8px",flex:1,minHeight:0}}>
+              <img src={student.photo} alt="" style={{width:100,height:128,borderRadius:8,border:"2px solid #bfdbfe",objectFit:"cover",flexShrink:0}}/>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:18,fontWeight:900,color:"#0f172a",marginBottom:4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",letterSpacing:0.3}}>{student.name}</div>
+                <div style={{fontSize:13,color:"#1d4ed8",fontFamily:"monospace",fontWeight:700,marginBottom:8,letterSpacing:1}}>ID: {student.rollNo}</div>
+                {[["Class",cls?cls.name+"-"+cls.section:"—"],["Blood",bloodGroup],["Year",String(new Date().getFullYear())]].map(([k,v])=>(
+                  <div key={k} style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:4}}>
+                    <span style={{color:"#64748b",fontWeight:600}}>{k}</span>
+                    <span style={{color:"#0f172a",fontWeight:800}}>{v}</span>
+                  </div>
+                ))}
+                {parentName&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:4}}>
+                  <span style={{color:"#64748b",fontWeight:600}}>Guardian</span>
+                  <span style={{color:"#0f172a",fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:220}}>{parentName}</span>
+                </div>}
+              </div>
+            </div>
+            {/* ── Contact ── */}
+            {(displayPhone||address)&&(
+              <div style={{borderTop:"1px solid #e2e8f0",margin:"0 18px",padding:"6px 0"}}>
+                {displayPhone&&<div style={{display:"flex",gap:8,fontSize:12,marginBottom:4,alignItems:"center"}}>
+                  <span style={{color:"#64748b",fontWeight:700,minWidth:52,flexShrink:0}}>{parentPhone?"Parent Ph":"Phone"}</span>
+                  <span style={{color:"#0f172a",fontWeight:800,fontFamily:"monospace",letterSpacing:0.5}}>{displayPhone}</span>
+                </div>}
+                {address&&<div style={{display:"flex",gap:8,fontSize:12,alignItems:"flex-start"}}>
+                  <span style={{color:"#64748b",fontWeight:700,minWidth:52,flexShrink:0}}>Address</span>
+                  <span style={{color:"#0f172a",fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:340}}>{address}</span>
+                </div>}
+              </div>
+            )}
+            {/* ── Footer ── */}
+            <div style={{height:80,background:"linear-gradient(135deg,#f8fafc,#f1f5f9)",borderTop:"1px solid #e2e8f0",padding:"0 18px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+              <div style={{background:"#1e3a8a",borderRadius:8,padding:"6px 16px",textAlign:"center"}}>
+                <div style={{fontSize:9,color:"rgba(255,255,255,0.7)",textTransform:"uppercase",letterSpacing:1.5}}>Student ID</div>
+                <div style={{fontSize:16,fontWeight:900,color:"#fff",fontFamily:"monospace",marginTop:3,letterSpacing:2}}>{student.rollNo}</div>
+              </div>
+              <img src={qrPreviewUrl} alt="QR" style={{width:64,height:64,borderRadius:6,border:"1px solid #cbd5e1"}}/>
+            </div>
           </div>
-          <img src={qrUrl} alt="QR" style={{width:78,height:78,borderRadius:8}}/>
         </div>
       </div>
-      {!(parentName||phone||address)&&(
-        <p className="text-white/30 text-xs text-center">Add phone, address & parent name in profile to show on ID card</p>
-      )}
+      <p className="text-white/40 text-xs text-center">ATM card size preview · 85.6 × 54 mm</p>
       {/* Action buttons */}
       <div className="flex gap-3">
-        <button onClick={downloadCard} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-sm px-5 py-2.5 rounded-xl transition-colors font-medium"><Download size={14}/>Download / Print ID Card</button>
+        <button onClick={downloadCard} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-sm px-5 py-2.5 rounded-xl transition-colors font-medium"><Download size={14}/>Print / Save ID Card</button>
         <button onClick={onClose} className="border border-white/10 text-white/50 text-sm px-4 py-2.5 rounded-xl hover:bg-white/5 transition-colors"><X size={14}/></button>
       </div>
-      <p className="text-white/25 text-xs">A print dialog will open. Use "Save as PDF" to download.</p>
+      <p className="text-white/25 text-xs">Print dialog opens → Save as PDF or send to printer</p>
     </div>
   );
 }
@@ -1087,6 +1196,7 @@ function MarksheetView({state,classId,onClassChange,availableClasses}:
               <th className="text-center text-xs font-semibold text-white/40 uppercase px-4 py-3">Total</th>
               <th className="text-center text-xs font-semibold text-white/40 uppercase px-4 py-3">Avg</th>
               <th className="text-center text-xs font-semibold text-white/40 uppercase px-4 py-3">Grade</th>
+              <th className="text-center text-xs font-semibold text-white/40 uppercase px-4 py-3">GPA</th>
             </tr></thead>
             <tbody>{results.sort((a,b)=>a.rank-b.rank).map(r=>(
               <tr key={r.student.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
@@ -1096,6 +1206,7 @@ function MarksheetView({state,classId,onClassChange,availableClasses}:
                 <td className="px-4 py-3 text-center font-mono text-sm text-white font-bold">{r.total}</td>
                 <td className="px-4 py-3 text-center font-mono text-sm text-white/60">{r.avg}%</td>
                 <td className="px-4 py-3 text-center"><span className={`font-mono font-bold text-lg ${gradeColor(r.grade)}`}>{r.grade}</span></td>
+                <td className="px-4 py-3 text-center"><span className={`font-mono font-bold ${gpaColor(calcGPA(r.avg))}`}>{calcGPA(r.avg).toFixed(1)}</span></td>
               </tr>
             ))}</tbody>
           </table>
@@ -1420,6 +1531,322 @@ function Layout({user,state,children,navItems,activeTab,setTab,onLogout,onBackTo
 // ═══════════════════════════════════════════════════════════════════════════════
 // ADMIN VIEW
 // ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── Shared UI ─────────────────────────────────────────────────────────────────
+
+// ─── TeacherPickerModal ──────────────────────────────────────────────────────
+function TeacherPickerModal({teachers,selected,onConfirm,onClose,allSubjects}:{
+  teachers:{id:string;name:string;email:string;photo?:string;status?:string}[];
+  selected:string[];onConfirm:(ids:string[])=>void;onClose:()=>void;
+  allSubjects?:{id:string;code:string;teacherIds:string[];name:string}[];
+}){
+  const [q,setQ]=React.useState("");
+  const [sel,setSel]=React.useState<string[]>(selected);
+  const approved=teachers.filter(t=>t.status!=="pending");
+  const filtered=q.trim()?approved.filter(t=>t.name.toLowerCase().includes(q.toLowerCase())||t.email.toLowerCase().includes(q.toLowerCase())):approved;
+  const toggle=(id:string)=>setSel(s=>s.includes(id)?s.filter(x=>x!==id):[...s,id]);
+  return(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/75 backdrop-blur-sm"/>
+      <div className="relative bg-[#0a1020] border border-white/10 rounded-2xl w-full max-w-md shadow-2xl flex flex-col" style={{maxHeight:"85vh"}} onClick={e=>e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/8">
+          <div>
+            <h3 className="text-white font-bold text-base flex items-center gap-2"><User size={16} className="text-blue-400"/>Select Teachers</h3>
+            <p className="text-white/30 text-xs mt-0.5">{sel.length} selected · {approved.length} total</p>
+          </div>
+          <button onClick={onClose} className="text-white/30 hover:text-white/70 transition-colors rounded-lg p-1.5 hover:bg-white/5"><X size={16}/></button>
+        </div>
+        <div className="px-4 pt-3 pb-2">
+          <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 focus-within:border-blue-500/40 transition-colors">
+            <Search size={13} className="text-white/30 flex-shrink-0"/>
+            <input autoFocus value={q} onChange={e=>setQ(e.target.value)} placeholder="Search name or email…" className="flex-1 bg-transparent text-white text-sm outline-none placeholder-white/20"/>
+            {q&&<button onClick={()=>setQ("")} className="text-white/20 hover:text-white/50 transition-colors"><X size={11}/></button>}
+          </div>
+        </div>
+        <div className="flex gap-3 px-4 pb-2">
+          <button onClick={()=>setSel(approved.map(t=>t.id))} className="text-[11px] text-blue-400/70 hover:text-blue-400 transition-colors">Select all</button>
+          <span className="text-white/15">|</span>
+          <button onClick={()=>setSel([])} className="text-[11px] text-white/30 hover:text-white/60 transition-colors">Clear</button>
+        </div>
+        <div className="overflow-y-auto flex-1 px-4 pb-3 space-y-1.5">
+          {filtered.length===0&&<div className="text-center py-10 text-white/20 text-sm">No teachers found</div>}
+          {filtered.map(t=>{
+            const isSel=sel.includes(t.id);
+            const otherSubs=(allSubjects||[]).filter(s=>(s.teacherIds||[]).includes(t.id));
+            return(
+              <button key={t.id} type="button" onClick={()=>toggle(t.id)}
+                className={`w-full flex items-center gap-3 p-3 rounded-xl border transition-all text-left group ${isSel?"border-blue-500/50 bg-blue-500/8":"border-white/6 hover:bg-white/4 hover:border-white/12"}`}>
+                {t.photo?<img src={t.photo} className="w-10 h-10 rounded-full object-cover border border-white/10 flex-shrink-0"/>
+                  :<div className={`w-10 h-10 rounded-full border flex items-center justify-center text-sm font-bold flex-shrink-0 transition-colors ${isSel?"bg-blue-500/20 border-blue-500/30 text-blue-300":"bg-white/5 border-white/10 text-white/60"}`}>{t.name[0]}</div>}
+                <div className="flex-1 min-w-0">
+                  <div className={`text-sm font-semibold truncate transition-colors ${isSel?"text-white":"text-white/75 group-hover:text-white/90"}`}>{t.name}</div>
+                  <div className="text-xs text-white/25 truncate">{t.email}</div>
+                  {otherSubs.length>0&&<div className="text-[10px] text-white/20 mt-0.5 truncate">📚 {otherSubs.map(s=>s.code).join(", ")}</div>}
+                </div>
+                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all ${isSel?"border-blue-500 bg-blue-500":"border-white/20 group-hover:border-white/40"}`}>
+                  {isSel&&<CheckCircle size={11} className="text-white"/>}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        <div className="px-4 py-4 border-t border-white/8 flex gap-3">
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-white/10 text-white/50 text-sm hover:bg-white/5 transition-colors">Cancel</button>
+          <button onClick={()=>onConfirm(sel)} className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold transition-colors shadow-lg shadow-blue-500/20">
+            Confirm{sel.length>0?` (${sel.length})`:""}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── AddSubjectForm — stateful subject create form with TeacherPickerModal ────
+function AddSubjectForm({state,upd,sb,close}:{state:AppState;upd:(fn:(s:AppState)=>AppState)=>void;sb:any;close:()=>void}){
+  const [n,setN]=React.useState("");
+  const [code,setCode]=React.useState("");
+  const [cat,setCat]=React.useState<SubjectCategory>("General");
+  const [cids,setCids]=React.useState<string[]>([]);
+  const [tids,setTids]=React.useState<string[]>([]);
+  const [showPicker,setShowPicker]=React.useState(false);
+  const selTeachers=state.teachers.filter(t=>tids.includes(t.id));
+  return(<>
+    {showPicker&&<TeacherPickerModal teachers={state.teachers} selected={tids} allSubjects={state.subjects}
+      onConfirm={ids=>{setTids(ids);setShowPicker(false);}} onClose={()=>setShowPicker(false)}/>}
+    <Modal title="Add Subject" onClose={close}>
+      <div className="space-y-4">
+        <div><label className="text-xs text-white/40 uppercase block mb-1.5">Subject Name *</label>
+          <input value={n} onChange={e=>setN(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm outline-none focus:border-blue-500/50 transition-colors" placeholder="e.g. Mathematics"/>
+        </div>
+        <div><label className="text-xs text-white/40 uppercase block mb-1.5">Code *</label>
+          <input value={code} onChange={e=>setCode(e.target.value.toUpperCase())} className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm outline-none focus:border-blue-500/50 font-mono transition-colors" placeholder="e.g. MTH"/>
+        </div>
+        <SelField label="Category" options={(["General","Science","Arts","Commerce"] as SubjectCategory[]).map(c=>({value:c,label:c}))} onChange={v=>setCat(v as SubjectCategory)} defaultValue={cat}/>
+        <div>
+          <label className="text-xs text-white/40 uppercase block mb-2">Teachers</label>
+          <button type="button" onClick={()=>setShowPicker(true)}
+            className="w-full flex items-center justify-between px-4 py-3 rounded-xl border border-dashed border-white/15 hover:border-blue-500/40 hover:bg-blue-500/5 transition-all group">
+            <div className="flex items-center gap-2 flex-wrap">
+              {tids.length===0
+                ?<><User size={14} className="text-white/25 group-hover:text-blue-400 transition-colors"/><span className="text-white/30 group-hover:text-white/60 transition-colors text-sm">Click to select teachers…</span></>
+                :selTeachers.slice(0,3).map(t=>(
+                  <div key={t.id} className="flex items-center gap-1.5 bg-blue-500/10 border border-blue-500/20 rounded-lg px-2.5 py-1">
+                    {t.photo?<img src={t.photo} className="w-4 h-4 rounded-full object-cover"/>:<div className="w-4 h-4 rounded-full bg-blue-500/30 flex items-center justify-center text-[8px] text-white font-bold">{t.name[0]}</div>}
+                    <span className="text-xs text-blue-300 font-medium">{t.name.split(" ")[0]}</span>
+                  </div>
+                ))
+              }
+              {tids.length>3&&<span className="text-xs text-white/40">+{tids.length-3} more</span>}
+            </div>
+            <span className="text-white/20 group-hover:text-blue-400 transition-colors text-xs flex-shrink-0">{tids.length>0?`${tids.length} selected ✎`:"Select →"}</span>
+          </button>
+        </div>
+        <div><label className="text-xs text-white/40 uppercase block mb-2">Classes</label>
+          <GradeClassPickerState classes={state.classes} initSelected={cids} onChange={v=>setCids(v)}/>
+        </div>
+        <MBtn onClick={async()=>{if(n&&code){const id=uid();upd(s=>({...s,subjects:[...s.subjects,{id,name:n,code,classIds:cids,teacherIds:tids,category:cat}]}));try{await sb.upsert("subjects",{id,name:n,code,class_ids:cids,teacher_ids:tids});}catch(e){console.warn("[sb.subjects]",e);}close();}}}>Create Subject</MBtn>
+      </div>
+    </Modal>
+  </>);
+}
+
+// ─── EditSubjectForm — stateful subject edit form with TeacherPickerModal ─────
+function EditSubjectForm({state,upd,sb,close,sub}:{state:AppState;upd:(fn:(s:AppState)=>AppState)=>void;sb:any;close:()=>void;sub:Subject}){
+  const [tids,setTids]=React.useState<string[]>([...(sub.teacherIds||[])]);
+  const [cids,setCids]=React.useState<string[]>([...sub.classIds]);
+  const [cat,setCat]=React.useState<SubjectCategory>((sub.category||"General") as SubjectCategory);
+  const [showPicker,setShowPicker]=React.useState(false);
+  const selTeachers=state.teachers.filter(t=>tids.includes(t.id));
+  return(<>
+    {showPicker&&<TeacherPickerModal teachers={state.teachers} selected={tids}
+      allSubjects={state.subjects.filter(s=>s.id!==sub.id)}
+      onConfirm={ids=>{setTids(ids);setShowPicker(false);}} onClose={()=>setShowPicker(false)}/>}
+    <Modal title={`Edit Subject — ${sub.name}`} onClose={close}>
+      <div className="space-y-4">
+        <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl px-4 py-3 flex items-center gap-3">
+          <span className="font-mono text-sm text-blue-400 bg-blue-500/20 px-2.5 py-1 rounded-lg font-bold">{sub.code}</span>
+          <div><div className="text-white font-semibold">{sub.name}</div><div className="text-xs text-white/40">{sub.category||"General"}</div></div>
+        </div>
+        <SelField label="Category" options={(["General","Science","Arts","Commerce"] as SubjectCategory[]).map(c=>({value:c,label:c}))} onChange={v=>setCat(v as SubjectCategory)} defaultValue={cat}/>
+        <div>
+          <label className="text-xs text-white/40 uppercase block mb-2">Teachers</label>
+          <button type="button" onClick={()=>setShowPicker(true)}
+            className="w-full flex items-center justify-between px-4 py-3 rounded-xl border border-dashed border-white/15 hover:border-blue-500/40 hover:bg-blue-500/5 transition-all group">
+            <div className="flex items-center gap-2 flex-wrap">
+              {tids.length===0
+                ?<><User size={14} className="text-white/25 group-hover:text-blue-400 transition-colors"/><span className="text-white/30 group-hover:text-white/60 transition-colors text-sm">No teachers assigned…</span></>
+                :selTeachers.slice(0,3).map(t=>(
+                  <div key={t.id} className="flex items-center gap-1.5 bg-blue-500/10 border border-blue-500/20 rounded-lg px-2.5 py-1">
+                    {t.photo?<img src={t.photo} className="w-4 h-4 rounded-full object-cover"/>:<div className="w-4 h-4 rounded-full bg-blue-500/30 flex items-center justify-center text-[8px] text-white font-bold">{t.name[0]}</div>}
+                    <span className="text-xs text-blue-300 font-medium">{t.name.split(" ")[0]}</span>
+                  </div>
+                ))
+              }
+              {tids.length>3&&<span className="text-xs text-white/40">+{tids.length-3} more</span>}
+            </div>
+            <span className="text-white/20 group-hover:text-blue-400 transition-colors text-xs flex-shrink-0">{tids.length>0?`${tids.length} ✎`:"Select →"}</span>
+          </button>
+        </div>
+        <div><label className="text-xs text-white/40 uppercase block mb-2">Assign Classes</label>
+          <GradeClassPickerState classes={state.classes} initSelected={cids} onChange={v=>setCids(v)}/>
+        </div>
+        <MBtn onClick={async()=>{
+          const updated={...sub,teacherIds:tids,classIds:cids,category:cat};
+          upd(s=>({...s,subjects:s.subjects.map(x=>x.id===sub.id?updated:x)}));
+          try{await sb.upsert("subjects",{id:sub.id,name:sub.name,code:sub.code,class_ids:cids,teacher_ids:tids});}catch(e){console.warn("[sb.editSubject]",e);}
+          close();
+        }}>Save Changes</MBtn>
+      </div>
+    </Modal>
+  </>);
+}
+
+// ─── GradeClassPicker — grouped grade→sections expandable multi-select ─────────
+function GradeClassPicker({classes,selected,onChange}:{classes:{id:string;name:string;section:string}[];selected:string[];onChange:(ids:string[])=>void}){
+  // Group by grade name
+  const grades:{name:string;classes:{id:string;name:string;section:string}[]}[]=[];
+  classes.forEach(c=>{
+    let g=grades.find(x=>x.name===c.name);
+    if(!g){g={name:c.name,classes:[]};grades.push(g);}
+    g.classes.push(c);
+  });
+  const [open,setOpen]=React.useState<Record<string,boolean>>({});
+  const toggle=(grade:string)=>setOpen(o=>({...o,[grade]:!o[grade]}));
+  const allInGrade=(g:{id:string}[])=>g.every(c=>selected.includes(c.id));
+  const someInGrade=(g:{id:string}[])=>g.some(c=>selected.includes(c.id));
+  const toggleGrade=(g:{id:string;name:string;section:string}[])=>{
+    if(allInGrade(g)){onChange(selected.filter(id=>!g.find(c=>c.id===id)));}
+    else{const add=g.map(c=>c.id).filter(id=>!selected.includes(id));onChange([...selected,...add]);}
+  };
+  const toggleClass=(id:string)=>{
+    if(selected.includes(id))onChange(selected.filter(x=>x!==id));
+    else onChange([...selected,id]);
+  };
+  return(
+    <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+      {grades.map(g=>{
+        const isOpen=open[g.name]??false;
+        const allSel=allInGrade(g.classes);
+        const someSel=!allSel&&someInGrade(g.classes);
+        const selCount=g.classes.filter(c=>selected.includes(c.id)).length;
+        return(
+          <div key={g.name} className="rounded-xl border border-white/8 overflow-hidden">
+            {/* Grade header row */}
+            <div className={`flex items-center gap-2 px-3 py-2.5 cursor-pointer transition-colors ${allSel?"bg-blue-500/10 border-b border-blue-500/20":someSel?"bg-white/4":"hover:bg-white/4"}`}>
+              {/* Grade-level checkbox */}
+              <input type="checkbox" className="accent-blue-500 cursor-pointer" checked={allSel} ref={el=>{if(el)el.indeterminate=someSel;}} onChange={()=>toggleGrade(g.classes)}/>
+              {/* Expand/collapse toggle */}
+              <button type="button" onClick={()=>toggle(g.name)} className="flex-1 flex items-center gap-2 text-left">
+                <span className={`text-sm font-semibold ${allSel?"text-blue-300":someSel?"text-white":"text-white/70"}`}>Grade {g.name}</span>
+                {selCount>0&&<span className="text-[10px] bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full font-mono">{selCount}/{g.classes.length}</span>}
+                <span className="ml-auto text-white/30">{isOpen?"▲":"▼"}</span>
+              </button>
+            </div>
+            {/* Sections list */}
+            {isOpen&&(
+              <div className="grid grid-cols-3 gap-1.5 p-2 bg-white/2 border-t border-white/5">
+                {g.classes.map(c=>{
+                  const sel=selected.includes(c.id);
+                  return(
+                    <label key={c.id} className={`flex items-center gap-2 px-2.5 py-2 rounded-lg cursor-pointer border transition-all text-sm ${sel?"border-blue-500/40 bg-blue-500/10 text-blue-300":"border-white/8 text-white/50 hover:bg-white/5 hover:text-white/80"}`}>
+                      <input type="checkbox" className="accent-blue-500" checked={sel} onChange={()=>toggleClass(c.id)}/>
+                      <span className="font-medium">{c.section}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {grades.length===0&&<p className="text-white/20 text-xs text-center py-4">No classes created yet</p>}
+    </div>
+  );
+}
+
+
+// Stateful wrapper for addSubject (which uses let vars, not useState)
+function GradeClassPickerState({classes,initSelected,onChange}:{classes:{id:string;name:string;section:string}[];initSelected:string[];onChange:(ids:string[])=>void}){
+  const [sel,setSel]=React.useState<string[]>(initSelected);
+  return <GradeClassPicker classes={classes} selected={sel} onChange={v=>{setSel(v);onChange(v);}}/>;
+}
+
+function AddClassModal({state,sb,upd,close}:{state:AppState;sb:any;upd:(fn:(s:AppState)=>AppState)=>void;close:()=>void}){
+  const [n,setN]=useState("");
+  const [sec,setSec]=useState("");
+  const [tid,setTid]=useState("");
+  const [dupErr,setDupErr]=useState("");
+  return(
+    <Modal title="Add Class" onClose={close}>
+      <Field label="Class Name" onChange={v=>{setN(v);setDupErr("");}}/>
+      <Field label="Section" onChange={v=>{setSec(v);setDupErr("");}}/>
+      <SelField label="Class Teacher" options={state.teachers.map(t=>({value:t.id,label:t.name}))} onChange={v=>setTid(v)}/>
+      {dupErr&&<div className="text-red-400 text-xs bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">⚠️ {dupErr}</div>}
+      <MBtn onClick={async()=>{
+        if(n&&sec){
+          const exists=state.classes.find(c=>c.name.trim().toLowerCase()===n.trim().toLowerCase()&&c.section.trim().toLowerCase()===sec.trim().toLowerCase());
+          if(exists){setDupErr(`Class ${n.trim()}-${sec.trim()} already exists!`);return;}
+          const id=uid();
+          upd(s=>({...s,classes:sortClasses([...s.classes,{id,name:n,section:sec,teacherId:tid}])}));
+          try{await sb.upsert("classes",{id,name:n,section:sec,teacher_id:tid||null});}catch(e){console.warn("[sb.classes]",e);}
+          close();
+        }
+      }}>Create</MBtn>
+    </Modal>
+  );
+}
+
+function ScrollLockModal({children,onClose}:{children:React.ReactNode;onClose:()=>void}){
+  React.useEffect(()=>{
+    const scrollY=window.scrollY;
+    document.body.style.position="fixed";
+    document.body.style.top=`-${scrollY}px`;
+    document.body.style.width="100%";
+    return()=>{
+      document.body.style.position="";
+      document.body.style.top="";
+      document.body.style.width="";
+      window.scrollTo(0,scrollY);
+    };
+  },[]);
+  return(
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
+      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function Modal({title,children,onClose,wide}:{title:string;children:React.ReactNode;onClose:()=>void;wide?:boolean}) {
+  React.useEffect(()=>{
+    const scrollY=window.scrollY;
+    document.body.style.position="fixed";
+    document.body.style.top=`-${scrollY}px`;
+    document.body.style.width="100%";
+    return()=>{
+      document.body.style.position="";
+      document.body.style.top="";
+      document.body.style.width="";
+      window.scrollTo(0,scrollY);
+    };
+  },[]);
+  return(
+    <div className={`bg-[#080D18] border border-white/10 rounded-2xl p-6 ${wide?"w-full max-w-2xl":"w-96"} space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto`}>
+      <div className="flex items-center justify-between"><h3 className="font-bold text-white">{title}</h3><button onClick={onClose} className="text-white/30 hover:text-white/60 transition-colors"><X size={16}/></button></div>
+      {children}
+    </div>
+  );
+}
+function Field({label,onChange,type="text",defaultValue=""}:{label:string;onChange:(v:string)=>void;type?:string;defaultValue?:string}){
+  return<div><label className="text-xs text-white/40 uppercase tracking-wider block mb-1.5">{label}</label><input type={type} defaultValue={defaultValue} onChange={e=>onChange(e.target.value)} className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50"/></div>;
+}
+function SelField({label,options,onChange,defaultValue}:{label:string;options:{value:string;label:string}[];onChange:(v:string)=>void;defaultValue?:string}){
+  return<div><label className="text-xs text-white/40 uppercase tracking-wider block mb-1.5">{label}</label><select defaultValue={defaultValue??""} onChange={e=>onChange(e.target.value)} className="w-full bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50"><option value="">— Select —</option>{options.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}</select></div>;
+}
+function MBtn({onClick,children}:{onClick:()=>void;children:React.ReactNode}){
+  return<button onClick={onClick} className="w-full bg-blue-600 hover:bg-blue-500 text-white text-sm py-2.5 rounded-xl transition-colors font-medium mt-1">{children}</button>;
+}
 function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
   {user:LoggedInUser;state:AppState;setState:(fn:(s:AppState)=>AppState)=>void;onLogout:()=>void;onBackToSite?:()=>void;isSA?:boolean;db:DbOps}) {
 
@@ -1431,10 +1858,22 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
   const [qrIn,setQrIn]         = useState("");
   const [qrOk,setQrOk]         = useState<Student|null>(null);
   const [sc,setSC]             = useState(state.classes[0]?.id||"");
+  const [adminScanFeedback,setAdminScanFeedback] = useState<{type:"success"|"error"|"duplicate";msg:string}|null>(null);
+  const [adminAttMode,setAdminAttMode] = useState<"today"|"history">("today");
+  const [adminHistDate,setAdminHistDate] = useState(new Date().toISOString().split("T")[0]);
+  const [adminCameraActive,setAdminCameraActive] = useState(false);
+  const [adminCamError,setAdminCamError] = useState("");
+  const [adminGunMode,setAdminGunMode]   = useState(false);
+  const adminGunBuffer = React.useRef("");
+  const adminGunTimer  = React.useRef<ReturnType<typeof setTimeout>|null>(null);
+  const adminVideoRef = React.useRef<HTMLVideoElement>(null);
+  const adminCanvasRef = React.useRef<HTMLCanvasElement>(null);
+  const adminScanLoopRef = React.useRef<number|null>(null);
   const [ss,setSS]             = useState(state.subjects[0]?.id||"");
   const [me,setME]             = useState<Record<string,string>>({});
   const [dashCls,setDashCls]   = useState(state.classes[0]?.id||"");
   const [adminSearch,setAS]    = useState("");
+  const [adminClassF,setACF]   = useState("all");
   const [csvMsg,setCsvMsg]     = useState("");
   const [editSt,setEditSt]     = useState<Student|null>(null);
   const [editTch,setEditTch]   = useState<Teacher|null>(null);
@@ -1442,6 +1881,127 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
 
   const pendingCount = state.students.filter(s=>s.status==="pending").length
                      + state.teachers.filter(t=>t.status==="pending").length;
+
+  // Stop admin camera when leaving attendance tab
+  React.useEffect(()=>{
+    if(tab!=="attendance"){
+      if(adminScanLoopRef.current) cancelAnimationFrame(adminScanLoopRef.current);
+      if(adminVideoRef.current?.srcObject){
+        (adminVideoRef.current.srcObject as MediaStream).getTracks().forEach(t=>t.stop());
+        adminVideoRef.current.srcObject=null;
+      }
+      setAdminCameraActive(false);
+    }
+  },[tab]);
+
+  // Admin camera lifecycle
+  React.useEffect(()=>{
+    let active=true;
+    if(!adminCameraActive){
+      if(adminScanLoopRef.current) cancelAnimationFrame(adminScanLoopRef.current);
+      if(adminVideoRef.current?.srcObject){
+        (adminVideoRef.current.srcObject as MediaStream).getTracks().forEach(t=>t.stop());
+        adminVideoRef.current.srcObject=null;
+      }
+      return;
+    }
+    (async()=>{
+      try{
+        const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment",width:{ideal:1280},height:{ideal:720}}});
+        if(!active||!adminVideoRef.current){stream.getTracks().forEach(t=>t.stop());return;}
+        adminVideoRef.current.srcObject=stream;
+        await adminVideoRef.current.play();
+        setAdminCamError("");
+        let detector:any=null;
+        const hasBarcodeDetector="BarcodeDetector" in window;
+        if(hasBarcodeDetector){
+          try{ detector=new (window as any).BarcodeDetector({formats:["qr_code"]}); }catch{}
+        }
+        if(!detector&&!(window as any).jsQR){
+          const cdns=["https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js","https://unpkg.com/jsqr@1.4.0/dist/jsQR.js","https://cdnjs.cloudflare.com/ajax/libs/jsqr/1.4.0/jsQR.min.js"];
+          for(const cdn of cdns){
+            try{await new Promise<void>((res,rej)=>{const s=document.createElement("script");s.src=cdn;s.onload=()=>res();s.onerror=()=>rej();document.head.appendChild(s);});if((window as any).jsQR)break;}catch{}
+          }
+        }
+        async function adminTick(){
+          if(!active||!adminVideoRef.current||!adminCanvasRef.current)return;
+          const v=adminVideoRef.current;const cv=adminCanvasRef.current;
+          if(v.readyState!==v.HAVE_ENOUGH_DATA){adminScanLoopRef.current=requestAnimationFrame(adminTick);return;}
+          cv.width=v.videoWidth;cv.height=v.videoHeight;
+          const ctx=cv.getContext("2d");if(!ctx)return;
+          ctx.drawImage(v,0,0,cv.width,cv.height);
+          let result="";
+          if(detector){try{const codes=await detector.detect(cv);if(codes.length>0)result=codes[0].rawValue;}catch{}}
+          if(!result&&(window as any).jsQR){
+            const img=ctx.getImageData(0,0,cv.width,cv.height);
+            const code=(window as any).jsQR(img.data,img.width,img.height,{inversionAttempts:"dontInvert"});
+            if(code)result=code.data;
+          }
+          if(result){
+            const raw=result.trim();
+            const roll=raw.startsWith("STUDENT:")?raw.split(":")[1]:raw;
+            const todayDate=new Date().toISOString().split("T")[0];
+            const st=state.students.filter(s=>s.status!=="pending").find(s=>s.rollNo===roll);
+            if(!st){playBeep("error");setAdminScanFeedback({type:"error",msg:"Student not found: "+roll});setTimeout(()=>setAdminScanFeedback(null),3000);}
+            else if(state.attendance[todayDate]?.[st.rollNo]){playBeep("duplicate");setAdminScanFeedback({type:"duplicate",msg:st.name+" already marked present"});setTimeout(()=>setAdminScanFeedback(null),3000);}
+            else{
+              const time=new Date().toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit"});
+              upd(s=>({...s,attendance:{...s.attendance,[todayDate]:{...(s.attendance[todayDate]||{}),[st.rollNo]:true}}}));
+              playBeep("success");setAdminScanFeedback({type:"success",msg:st.name+" marked present ✓"});setTimeout(()=>setAdminScanFeedback(null),3000);
+              if(typeof fetch!=="undefined"){try{await fetch("/api/whatsapp-notify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({phone:(typeof st.profile==="string"?JSON.parse(st.profile||"{}"):st.profile)?.parentPhone||"",studentName:st.name,time})});}catch{}}
+              await new Promise(r=>setTimeout(r,1500));
+            }
+          }
+          adminScanLoopRef.current=requestAnimationFrame(adminTick);
+        }
+        adminScanLoopRef.current=requestAnimationFrame(adminTick);
+      }catch(err:any){
+        setAdminCamError(err?.message||"Camera access denied");
+        setAdminCameraActive(false);
+      }
+    })();
+    return()=>{
+      active=false;
+      if(adminScanLoopRef.current)cancelAnimationFrame(adminScanLoopRef.current);
+      if(adminVideoRef.current?.srcObject)(adminVideoRef.current.srcObject as MediaStream).getTracks().forEach(t=>t.stop());
+    };
+  },[adminCameraActive]);
+
+  // Gun/Bluetooth scanner — keyboard wedge mode
+  // Scanners type rapidly (< 50ms between chars) then send Enter
+  React.useEffect(()=>{
+    if(!adminGunMode) return;
+    function onKey(e:KeyboardEvent){
+      // Ignore if user is typing in an input
+      if(e.target instanceof HTMLInputElement||e.target instanceof HTMLTextAreaElement) return;
+      if(e.key==="Enter"){
+        const raw=adminGunBuffer.current.trim();
+        adminGunBuffer.current="";
+        if(adminGunTimer.current){clearTimeout(adminGunTimer.current);adminGunTimer.current=null;}
+        if(!raw) return;
+        const roll=raw.startsWith("STUDENT:")?raw.split(":")[1]:raw;
+        const todayDate=new Date().toISOString().split("T")[0];
+        const st=state.students.filter(s=>s.status!=="pending").find(s=>s.rollNo===roll);
+        if(!st){playBeep("error");setAdminScanFeedback({type:"error",msg:"Student not found: "+roll});setTimeout(()=>setAdminScanFeedback(null),3000);}
+        else if(state.attendance[todayDate]?.[st.rollNo]){playBeep("duplicate");setAdminScanFeedback({type:"duplicate",msg:st.name+" already marked present"});setTimeout(()=>setAdminScanFeedback(null),3000);}
+        else{
+          const time=new Date().toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit"});
+          upd(s=>({...s,attendance:{...s.attendance,[todayDate]:{...(s.attendance[todayDate]||{}),[st.rollNo]:true}}}));
+          playBeep("success");setAdminScanFeedback({type:"success",msg:"✓ "+st.name+" marked present"});setTimeout(()=>setAdminScanFeedback(null),3000);
+          const profile=typeof st.profile==="string"?JSON.parse(st.profile||"{}"):st.profile;
+          const parentPhone=profile?.parentPhone||profile?.phone||"";
+          if(parentPhone) try{fetch("/api/whatsapp-notify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({phone:parentPhone,studentName:st.name,time})});}catch{}
+        }
+      } else if(e.key.length===1){
+        adminGunBuffer.current+=e.key;
+        if(adminGunTimer.current) clearTimeout(adminGunTimer.current);
+        // Clear buffer if no new char within 500ms (manual typing reset)
+        adminGunTimer.current=setTimeout(()=>{adminGunBuffer.current="";},500);
+      }
+    }
+    window.addEventListener("keydown",onKey);
+    return()=>window.removeEventListener("keydown",onKey);
+  },[adminGunMode,state.students,state.attendance]);
 
   const NAV=[
     {id:"dashboard",        label:"Dashboard",        icon:Grid3X3},
@@ -1497,16 +2057,22 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
     const rows=parseCSV(text);
     const ns:any[]=rows.map(r=>{
       if(!r.name||!r.code) return null;
-      const tid=state.teachers.find(t=>t.name===r.teacher_name||t.email===r.teacher_email)?.id||"";
+      // Support teacher_emails (pipe-separated) OR legacy teacher_name/teacher_email
+      const tids:string[]=(r.teacher_emails||r.teacher_email||r.teacher_name)
+        ?(r.teacher_emails||r.teacher_email||"").split("|").map((e:string)=>{
+            const em=e.trim();
+            return state.teachers.find(t=>t.email===em||t.name===em)?.id||"";
+          }).filter(Boolean)
+        :[];
       const cids=r.classes?r.classes.split("|").map((cn:string)=>{const[nm,sec]=cn.trim().split("-");return state.classes.find(c=>c.name===nm&&c.section===sec)?.id;}).filter(Boolean):[];
-      return{id:uid(),name:r.name,code:r.code.toUpperCase(),classIds:cids,teacherId:tid,category:r.category||"General"};
+      return{id:uid(),name:r.name,code:r.code.toUpperCase(),classIds:cids,teacherIds:tids,category:r.category||"General"};
     }).filter(Boolean);
     if(!ns.length){setCsvMsg("No valid rows. Required columns: name, code"); return;}
     const newOnes=ns.filter(n=>!state.subjects.find(x=>x.code===n.code));
     setCsvMsg("⏳ Importing...");
     await Promise.all(newOnes.map(async(s:any)=>{
       upd(st=>({...st,subjects:[...st.subjects,s]}));
-      try{await sb.upsert("subjects",{id:s.id,name:s.name,code:s.code,class_ids:s.classIds,teacher_id:s.teacherId||null});}catch(e){console.warn("[sb.subjects]",e);}
+      try{await sb.upsert("subjects",{id:s.id,name:s.name,code:s.code,class_ids:s.classIds,teacher_ids:s.teacherIds||[]});}catch(e){console.warn("[sb.subjects]",e);}
     }));
     setCsvMsg(`✓ Imported ${newOnes.length} subjects successfully`);
   }
@@ -1765,13 +2331,16 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
             <div className="flex items-center gap-2">
               <button onClick={()=>setPopup({type:"addSubject"})} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-2 rounded-lg transition-colors"><Plus size={14}/>Add Subject</button>
               <label className="flex items-center gap-1.5 bg-[#0d1424] border border-white/10 hover:border-white/20 text-white/70 text-xs px-3 py-2 rounded-lg cursor-pointer transition-colors"><Upload size={12}/>Bulk CSV<input type="file" accept=".csv" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(!f)return;const r=new FileReader();r.onload=ev=>{importSubjectsCSV(ev.target?.result as string);e.target.value="";};r.readAsText(f);}}/></label>
+              <button onClick={()=>downloadCSV("subjects_template.csv",[["name","code","category","classes","teacher_emails"],["Mathematics","MTH","Science","9-A|10-B","arjun@nexus.edu"],["Physics","PHY","Science","9-A","arjun@nexus.edu|priya@nexus.edu"],["English","ENG","Arts","9-A|10-B","priya@nexus.edu"],["History","HIS","Arts","10-B",""],["Commerce","COM","Commerce","","arjun@nexus.edu"]])} className="flex items-center gap-1.5 border border-white/10 hover:border-blue-500/30 text-white/50 hover:text-blue-400 text-xs px-3 py-2 rounded-lg transition-colors"><Download size={12}/>Example CSV</button>
             </div>
           </div>
+          {csvMsg&&<div className="flex items-center gap-2 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-2.5"><CheckCircle size={12}/><span className="flex-1">{csvMsg}</span><button onClick={()=>setCsvMsg("")} className="text-white/30 hover:text-white/60"><X size={11}/></button></div>}
+          <div className="text-[10px] text-white/30 bg-white/3 border border-white/5 rounded-lg px-3 py-2">CSV columns: <span className="font-mono text-white/50">name*, code*, category, classes (9-A|10-B), teacher_emails (email1|email2)</span></div>
           <div className="bg-[#080D18] border border-white/5 rounded-xl overflow-hidden overflow-x-auto">
             <table className="w-full">
               <thead><tr className="border-b border-white/5">{["Code","Subject","Category","Classes","Teacher",""].map(h=><th key={h} className="text-left text-xs font-semibold text-white/40 uppercase tracking-wider px-4 py-3">{h}</th>)}</tr></thead>
               <tbody>{state.subjects.map(sub=>{
-                const teacher=state.teachers.find(t=>t.id===sub.teacherId);
+                const teachers=state.teachers.filter(t=>(sub.teacherIds||[]).includes(t.id));
                 const classes=state.classes.filter(c=>sub.classIds.includes(c.id));
                 return(
                   <tr key={sub.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
@@ -1779,8 +2348,24 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
                     <td className="px-4 py-3 text-sm text-white">{sub.name}</td>
                     <td className="px-4 py-3"><span className="text-xs px-2 py-1 rounded bg-white/5 text-white/50">{sub.category||"General"}</span></td>
                     <td className="px-4 py-3"><div className="flex gap-1 flex-wrap">{classes.map(c=><span key={c.id} className="text-xs bg-white/5 text-white/50 px-2 py-0.5 rounded">{c.name}-{c.section}</span>)}</div></td>
-                    <td className="px-4 py-3 text-sm text-white/60">{teacher?.name||"–"}</td>
-                    <td className="px-4 py-3"><button onClick={async()=>{upd(s=>({...s,subjects:s.subjects.filter(x=>x.id!==sub.id)}));try{await sb.delete("subjects",sub.id);}catch(e){console.warn("[sb.subjects delete]",e);}}} className="text-white/20 hover:text-red-400 transition-colors"><Trash2 size={14}/></button></td>
+                    <td className="px-4 py-3">
+                      {teachers.length>0
+                        ? <div className="flex flex-col gap-1">
+                            {teachers.map(t=>(
+                              <div key={t.id} className="flex items-center gap-1.5">
+                                {t.photo?<img src={t.photo} className="w-5 h-5 rounded-full object-cover border border-white/10 flex-shrink-0"/>:<div className="w-5 h-5 rounded-full bg-gradient-to-br from-blue-500/30 to-purple-500/30 border border-white/10 flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">{t.name[0]}</div>}
+                                <span className="text-xs text-white/70">{t.name}</span>
+                              </div>
+                            ))}
+                          </div>
+                        : <span className="text-xs text-amber-400/70 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full">No teacher</span>}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex gap-1.5">
+                        <button onClick={()=>setPopup({type:"editSubject",data:sub})} className="flex items-center gap-1 text-xs border border-blue-500/30 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 px-2.5 py-1.5 rounded-lg transition-colors"><Edit2 size={11}/>Edit</button>
+                        <button onClick={async()=>{upd(s=>({...s,subjects:s.subjects.filter(x=>x.id!==sub.id)}));try{await sb.delete("subjects",sub.id);}catch(e){console.warn("[sb.subjects delete]",e);}}} className="text-white/20 hover:text-red-400 transition-colors p-1.5"><Trash2 size={13}/></button>
+                      </div>
+                    </td>
                   </tr>
                 );
               })}</tbody>
@@ -1806,7 +2391,7 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
           <div className="text-[10px] text-white/30 bg-white/3 border border-white/5 rounded-lg px-3 py-2">CSV columns: <span className="font-mono text-white/50">name, email, password, dob, gender, phone, address, qualification, specialization, join_date, nic</span></div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {state.teachers.filter(t=>t.status!=="pending").map(t=>{
-              const subs=state.subjects.filter(s=>s.teacherId===t.id);
+              const subs=state.subjects.filter(s=>(s.teacherIds||[]).includes(t.id));
               const cls=state.classes.filter(c=>subs.some(s=>s.classIds.includes(c.id)));
               const ownCls=state.classes.filter(c=>c.teacherId===t.id);
               const d=decProfile(t.profile);
@@ -1866,76 +2451,45 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
               const schoolName=state.settings.name;
               const schoolTagline=state.settings.tagline;
               const logoUrl=state.settings.logoUrl||"";
+              const BULK_CSS=`*{margin:0;padding:0;box-sizing:border-box}body{background:#e5e7eb;font-family:'Segoe UI',Arial,sans-serif;padding:8mm}.page-grid{display:grid;grid-template-columns:repeat(2,85.6mm);gap:5mm;justify-content:center}.card{width:85.6mm;height:54mm;background:#fff;border:.5px solid #cbd5e1;border-radius:3mm;overflow:hidden;position:relative;font-family:'Segoe UI',Arial,sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.1)}.card-top{background:linear-gradient(135deg,#1e3a8a,#1d4ed8);padding:0 2.5mm;display:flex;align-items:center;gap:2mm;height:13mm}.logo{width:8mm;height:8mm;border-radius:1mm;object-fit:cover;flex-shrink:0}.logo-ph{width:8mm;height:8mm;border-radius:1mm;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-size:5mm;flex-shrink:0;line-height:1}.sn{font-size:5.5px;font-weight:800;color:#fff;text-transform:uppercase;letter-spacing:.3px;line-height:1.2}.st{font-size:4px;color:rgba(255,255,255,.75);margin-top:.5mm;letter-spacing:.2px}.card-body{display:flex;gap:2mm;padding:1.8mm 2.5mm;align-items:flex-start}.photo{width:15mm;height:19mm;border-radius:1.5mm;border:.5px solid #bfdbfe;object-fit:cover;flex-shrink:0}.info{flex:1;min-width:0}.nm{font-size:6.5px;font-weight:800;color:#0f172a;margin-bottom:.8mm;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.rl{font-size:5px;color:#1d4ed8;font-family:monospace;font-weight:700;margin-bottom:1.2mm;letter-spacing:.3px}.dr{display:flex;justify-content:space-between;font-size:4.8px;margin-bottom:.7mm;gap:1mm}.dl{color:#64748b;font-weight:600;flex-shrink:0}.dv{color:#0f172a;font-weight:700;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.divider{border:none;border-top:.3px solid #e2e8f0;margin:0 2.5mm}.contacts{padding:.8mm 2.5mm}.cr{display:flex;gap:1mm;font-size:4.5px;margin-bottom:.5mm}.cl{color:#64748b;font-weight:600;flex-shrink:0;min-width:7mm}.cv{color:#0f172a;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.footer{position:absolute;bottom:0;left:0;right:0;height:11.5mm;background:linear-gradient(135deg,#f8fafc,#f1f5f9);border-top:.4px solid #e2e8f0;padding:1mm 2.5mm;display:flex;align-items:center;justify-content:space-between}.badge{background:#1e3a8a;border-radius:1mm;padding:.8mm 2mm;text-align:center}.bl{font-size:3.5px;color:rgba(255,255,255,.7);text-transform:uppercase;letter-spacing:.5px}.bv{font-size:5.5px;font-weight:800;color:#fff;font-family:monospace;margin-top:.3mm;letter-spacing:.5px}.qr{width:9mm;height:9mm;border-radius:.8mm;border:.4px solid #cbd5e1}@media print{body{background:#fff;padding:8mm}.card{box-shadow:none;border:.4px solid #94a3b8}@page{size:A4 portrait;margin:8mm}}`;
               const cardsHtml=target.map(st=>{
                 const cls=state.classes.find(c=>c.id===st.classId);
                 const d=decProfile(st.profile);
                 const qrData=encodeURIComponent("STUDENT:"+st.rollNo+":"+st.name);
-                const qrUrl="https://api.qrserver.com/v1/create-qr-code/?size=120x120&data="+qrData+"&bgcolor=0d1117&color=60a5fa&margin=8";
-                const logoHtml=logoUrl?`<img src="${logoUrl}" style="width:36px;height:36px;border-radius:8px;object-fit:cover;flex-shrink:0"/>`:`<div style="width:36px;height:36px;background:rgba(255,255,255,0.15);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">🏫</div>`;
-                return `<div class="card">
-                  <div class="top">${logoHtml}<div><div class="school-name">${schoolName}</div><div class="school-tag">${schoolTagline}</div></div></div>
-                  <div class="body">
-                    <img src="${st.photo}" class="photo"/>
-                    <div class="info">
-                      <div class="name">${st.name}</div>
-                      <div class="roll">Roll No: ${st.rollNo}</div>
-                      <div class="row">Class <span>${cls?cls.name+"-"+cls.section:"—"}</span></div>
-                      <div class="row">Blood Group <span>${d.bloodGroup||"—"}</span></div>
-                      <div class="row">Academic Year <span>2026</span></div>
-                    </div>
-                  </div>
-                  ${(d.parentName||d.phone||d.address)?`<hr class="divider"/><div class="contact">
-                    ${d.parentName?`<div class="contact-row">👤 Custodian &nbsp;<span>${d.parentName}</span></div>`:""}
-                    ${d.phone?`<div class="contact-row">📞 Phone &nbsp;<span>${d.phone}</span></div>`:""}
-                    ${d.address?`<div class="contact-row">📍 Address &nbsp;<span>${d.address}</span></div>`:""}
-                  </div>`:""}
-                  <div class="bottom">
-                    <div class="badge"><div class="label">Student ID</div><div class="val">${st.rollNo}</div></div>
-                    <img src="${qrUrl}" width="78" height="78" style="border-radius:8px"/>
-                  </div>
-                </div>`;
-              }).join("<div class='pagebreak'></div>");
-              const html=`<!DOCTYPE html><html><head><style>
-                *{margin:0;padding:0;box-sizing:border-box}
-                body{background:#f3f4f6;font-family:'Segoe UI',sans-serif;padding:16px}
-                .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:16px}
-                .card{width:360px;background:linear-gradient(135deg,#0f1729 0%,#111827 50%,#0d1b2a 100%);border:1px solid rgba(59,130,246,0.3);border-radius:16px;overflow:hidden;color:white}
-                .top{background:linear-gradient(135deg,#1e3a5f,#1e40af);padding:14px 16px;display:flex;align-items:center;gap:12px}
-                .top .school-name{font-size:14px;font-weight:700;color:white}
-                .top .school-tag{font-size:10px;color:rgba(255,255,255,0.6);margin-top:2px}
-                .body{padding:16px;display:flex;gap:14px;align-items:flex-start}
-                .photo{width:82px;height:90px;border-radius:10px;border:2px solid rgba(59,130,246,0.5);flex-shrink:0;object-fit:cover}
-                .info{flex:1}
-                .name{font-size:15px;font-weight:700;color:white;margin-bottom:2px}
-                .roll{font-size:11px;color:#60a5fa;font-family:monospace;margin-bottom:7px}
-                .row{display:flex;justify-content:space-between;font-size:10.5px;color:rgba(255,255,255,0.45);margin-bottom:3px}
-                .row span{color:rgba(255,255,255,0.88);font-weight:500}
-                .divider{border:none;border-top:1px solid rgba(255,255,255,0.07);margin:10px 16px}
-                .contact{padding:0 16px 10px}
-                .contact-row{display:flex;gap:6px;font-size:10px;color:rgba(255,255,255,0.45);margin-bottom:4px;align-items:flex-start}
-                .contact-row span{color:rgba(255,255,255,0.8);font-weight:500}
-                .bottom{padding:10px 16px;display:flex;align-items:center;justify-content:space-between;border-top:1px solid rgba(255,255,255,0.08)}
-                .badge{background:rgba(59,130,246,0.12);border:1px solid rgba(59,130,246,0.3);border-radius:8px;padding:6px 14px;text-align:center}
-                .badge .label{font-size:9px;color:#60a5fa;text-transform:uppercase;letter-spacing:1px}
-                .badge .val{font-size:15px;font-weight:700;color:white;margin-top:2px;font-family:monospace}
-                .pagebreak{page-break-after:always}
-                @media print{body{background:white;padding:8px}.grid{grid-template-columns:repeat(2,360px);gap:12px}@page{size:A4;margin:10mm}}
-              </style></head><body><div class="grid">${cardsHtml}</div></body></html>`;
+                const qrSrc="https://api.qrserver.com/v1/create-qr-code/?size=90x90&data="+qrData+"&bgcolor=ffffff&color=000000&margin=4";
+                const classStr=cls?cls.name+"-"+cls.section:"—";
+                const logoHtml=logoUrl?`<img src="${logoUrl}" class="logo" onerror="this.style.display='none'"/>`:`<div class="logo-ph">🏫</div>`;
+                const hasContact=d.parentPhone||d.phone||d.address;
+                return`<div class="card"><div class="card-top">${logoHtml}<div><div class="sn">${schoolName}</div><div class="st">${schoolTagline}</div></div></div><div class="card-body"><img src="${st.photo}" class="photo" onerror="this.src='https://api.dicebear.com/7.x/avataaars/svg?seed=${st.id}'"/><div class="info"><div class="nm">${st.name}</div><div class="rl">ID: ${st.rollNo}</div><div class="dr"><span class="dl">Class</span><span class="dv">${classStr}</span></div><div class="dr"><span class="dl">Blood</span><span class="dv">${d.bloodGroup||"—"}</span></div><div class="dr"><span class="dl">Year</span><span class="dv">${new Date().getFullYear()}</span></div>${d.parentName?`<div class="dr"><span class="dl">Guardian</span><span class="dv">${d.parentName}</span></div>`:""}</div></div>${hasContact?`<hr class="divider"/><div class="contacts">${(d.parentPhone||d.phone)?`<div class="cr"><span class="cl">${d.parentPhone?"Parent":"Phone"}</span><span class="cv">${d.parentPhone||d.phone}</span></div>`:""}${d.address?`<div class="cr"><span class="cl">Address</span><span class="cv">${d.address}</span></div>`:""}</div>`:""}<div class="footer"><div class="badge"><div class="bl">Student ID</div><div class="bv">${st.rollNo}</div></div><img src="${qrSrc}" class="qr"/></div></div>`;
+              }).join("");
+              const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><style>${BULK_CSS}</style></head><body><div class="page-grid">${cardsHtml}</div></body></html>`;
               const w=window.open("","_blank","width=900,height=700");
               if(!w)return;
               w.document.write(html);
               w.document.close();
-              w.onload=()=>{w.print();};
+              w.onload=()=>setTimeout(()=>w.print(),400);
             }} className="flex items-center gap-2 bg-[#C9A84C] hover:bg-[#b8963f] text-[#0f1729] font-bold text-xs px-4 py-2 rounded-lg transition-colors flex-shrink-0">
               <Download size={12}/>Download All ID Cards
             </button>
           </div>
           {csvMsg&&<div className="flex items-center gap-2 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-2.5"><CheckCircle size={12}/><span className="flex-1">{csvMsg}</span><button onClick={()=>setCsvMsg("")} className="text-white/30 hover:text-white/60"><X size={11}/></button></div>}
           <div className="text-[10px] text-white/30 bg-white/3 border border-white/5 rounded-lg px-3 py-2">CSV columns: <span className="font-mono text-white/50">name, rollno, class, section, password, dob, gender, phone, address, parent_name, parent_phone, blood_group</span></div>
+          {/* Search + Class Filter */}
+          <div className="flex gap-2 flex-wrap">
+            <div className="flex items-center gap-2 bg-[#080D18] border border-white/10 rounded-xl px-3 py-2 flex-1 min-w-[160px]">
+              <Search size={13} className="text-white/30 flex-shrink-0"/>
+              <input value={adminSearch} onChange={e=>setAS(e.target.value)} placeholder="Search name or roll no…" className="bg-transparent text-white text-sm outline-none placeholder-white/20 w-full"/>
+              {adminSearch&&<button onClick={()=>setAS("")} className="text-white/30 hover:text-white/60"><X size={12}/></button>}
+            </div>
+            <select value={adminClassF} onChange={e=>setACF(e.target.value)} className="bg-[#080D18] border border-white/10 text-white text-sm rounded-xl px-3 py-2 outline-none focus:border-blue-500/50">
+              <option value="all">All Classes</option>
+              {state.classes.map(c=><option key={c.id} value={c.id}>Class {c.name}-{c.section}</option>)}
+            </select>
+          </div>
           <div className="bg-[#080D18] border border-white/5 rounded-xl overflow-hidden overflow-x-auto">
             <table className="w-full">
               <thead><tr className="border-b border-white/5">{["","Roll","Name","Class","Profile",""].map((h,i)=><th key={i} className="text-left text-xs font-semibold text-white/40 uppercase tracking-wider px-4 py-3">{h}</th>)}</tr></thead>
-              <tbody>{state.students.filter(st=>st.status!=="pending").map(st=>{
+              <tbody>{state.students.filter(st=>st.status!=="pending"&&(adminClassF==="all"||st.classId===adminClassF)&&(!adminSearch||st.name.toLowerCase().includes(adminSearch.toLowerCase())||st.rollNo.includes(adminSearch))).map(st=>{
                 const cls=state.classes.find(c=>c.id===st.classId);
                 const d=decProfile(st.profile);
                 return(
@@ -2052,42 +2606,115 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
         </div>
       );
 
-      case "attendance": return(
-        <div className="space-y-6">
-          <h2 className="text-xl font-bold text-white">QR Attendance</h2>
-          <div className="max-w-md mx-auto space-y-4">
-            <div className="bg-[#080D18] border border-white/5 rounded-2xl p-8 text-center">
-              <div className="w-20 h-20 mx-auto mb-5 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center"><QrCode size={36} className="text-blue-400"/></div>
-              <p className="text-white/40 text-sm mb-5">Enter roll number or scan QR</p>
-              <div className="flex gap-2">
-                <input value={qrIn} onChange={e=>setQrIn(e.target.value)} onKeyDown={e=>e.key==="Enter"&&scanQr()} placeholder="Roll Number" className="flex-1 bg-white/5 border border-white/10 text-white font-mono text-sm rounded-xl px-4 py-3 outline-none focus:border-blue-500/50 placeholder-white/20"/>
-                <button onClick={scanQr} className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-xl transition-colors"><Check size={16}/></button>
+      case "attendance": {
+        const todayDate=new Date().toISOString().split("T")[0];
+        const allStudents=state.students.filter(s=>s.status!=="pending");
+        const viewDate=adminAttMode==="today"?todayDate:adminHistDate;
+        return(
+          <div className="space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <h2 className="text-xl font-bold text-white">QR Attendance</h2>
+              <div className="flex gap-2 p-1 bg-white/5 rounded-xl">
+                <button onClick={()=>setAdminAttMode("today")} className={`text-xs px-4 py-1.5 rounded-lg font-medium transition-all ${adminAttMode==="today"?"bg-blue-600 text-white":"text-white/40 hover:text-white/70"}`}>Today</button>
+                <button onClick={()=>setAdminAttMode("history")} className={`text-xs px-4 py-1.5 rounded-lg font-medium transition-all ${adminAttMode==="history"?"bg-purple-600 text-white":"text-white/40 hover:text-white/70"}`}>History</button>
               </div>
-              {qrOk&&(
-                <div className="mt-5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 flex items-center gap-4 animate-pulse">
-                  <img src={qrOk.photo} className="w-12 h-12 rounded-full border-2 border-emerald-500/40"/>
-                  <div className="text-left"><div className="text-emerald-400 font-semibold text-sm">✓ Marked Present</div><div className="text-white text-sm">{qrOk.name}</div><div className="text-white/40 text-xs font-mono">Roll: {qrOk.rollNo}</div></div>
-                </div>
-              )}
             </div>
-            <div className="bg-[#080D18] border border-white/5 rounded-xl p-4">
-              <div className="text-xs text-white/30 uppercase tracking-wider mb-3">Today — {today}</div>
-              {state.students.map(st=>{
-                const present=state.attendance[today]?.[st.rollNo];
-                return(
-                  <div key={st.id} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
-                    <div className="flex items-center gap-2"><img src={st.photo} className="w-6 h-6 rounded-full"/><span className="text-sm text-white">{st.name}</span></div>
-                    <div className="flex items-center gap-2">
-                      <span className={`w-2 h-2 rounded-full ${present?"bg-emerald-400":"bg-white/10"}`}/>
-                      <button onClick={()=>upd(s=>({...s,attendance:{...s.attendance,[today]:{...(s.attendance[today]||{}),[st.rollNo]:!present}}}))} className="text-xs text-white/30 hover:text-white/60 transition-colors">{present?"Undo":"Mark"}</button>
+            {adminAttMode==="history"&&(
+              <input type="date" value={adminHistDate} onChange={e=>setAdminHistDate(e.target.value)} className="bg-[#080D18] border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none"/>
+            )}
+            {adminAttMode==="today"&&(
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Scanner */}
+                <div className="bg-[#080D18] border border-white/5 rounded-2xl p-5 space-y-4">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="text-sm font-semibold text-white">QR Attendance Scanner</div>
+                    <div className="flex gap-2">
+                      <button onClick={()=>{setAdminGunMode(v=>{if(!v){setAdminCameraActive(false);}return!v;});setAdminScanFeedback(null);}} className={`flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg border transition-colors ${adminGunMode?"bg-emerald-500/20 border-emerald-500/30 text-emerald-400":"bg-white/5 border-white/10 text-white/50 hover:text-white/80"}`}>
+                        🔫 {adminGunMode?"Gun Scanner ON":"Gun/BT Scanner"}
+                      </button>
+                      <button onClick={()=>{setAdminCameraActive(v=>!v);setAdminCamError("");if(!adminCameraActive)setAdminGunMode(false);}} className={`flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg border transition-colors ${adminCameraActive?"bg-red-500/20 border-red-500/30 text-red-400":"bg-blue-500/20 border-blue-500/30 text-blue-400 hover:bg-blue-500/30"}`}>
+                        <Camera size={12}/>{adminCameraActive?"Stop Camera":"Camera"}
+                      </button>
                     </div>
                   </div>
-                );
-              })}
-            </div>
+                  {adminGunMode&&(
+                    <div className="bg-emerald-500/8 border border-emerald-500/20 rounded-xl p-3 space-y-1.5">
+                      <div className="text-xs text-emerald-400 font-semibold flex items-center gap-2">🔫 Bluetooth / USB Gun Scanner Active</div>
+                      <div className="text-[11px] text-emerald-300/60">Point scanner at any student QR card. Make sure this page is focused (click anywhere on screen first).</div>
+                      {adminScanFeedback&&(
+                        <div className={`rounded-lg px-3 py-2 text-sm font-medium mt-1 ${adminScanFeedback.type==="success"?"bg-emerald-500/20 text-emerald-300":adminScanFeedback.type==="duplicate"?"bg-amber-500/20 text-amber-300":"bg-red-500/20 text-red-300"}`}>{adminScanFeedback.msg}</div>
+                      )}
+                    </div>
+                  )}
+                  {adminCamError&&<div className="text-red-400 text-xs bg-red-500/10 border border-red-500/20 rounded-xl p-3">⚠️ {adminCamError}</div>}
+                  {adminCameraActive&&(
+                    <div className="relative rounded-xl overflow-hidden bg-black aspect-video">
+                      <video ref={adminVideoRef} className="w-full h-full object-cover" playsInline muted autoPlay/>
+                      <canvas ref={adminCanvasRef} className="hidden"/>
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <div className="w-48 h-48 border-2 border-blue-400/60 rounded-2xl relative">
+                          <div className="absolute top-0 left-0 w-6 h-6 border-t-2 border-l-2 border-blue-400 rounded-tl-lg"/>
+                          <div className="absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-blue-400 rounded-tr-lg"/>
+                          <div className="absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2 border-blue-400 rounded-bl-lg"/>
+                          <div className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-blue-400 rounded-br-lg"/>
+                        </div>
+                      </div>
+                      {adminScanFeedback&&(
+                        <div className={`absolute bottom-3 left-3 right-3 rounded-xl p-3 border ${adminScanFeedback.type==="success"?"bg-emerald-500/20 border-emerald-500/40":adminScanFeedback.type==="duplicate"?"bg-amber-500/20 border-amber-500/40":"bg-red-500/20 border-red-500/40"}`}>
+                          <div className={`text-sm font-semibold ${adminScanFeedback.type==="success"?"text-emerald-300":adminScanFeedback.type==="duplicate"?"text-amber-300":"text-red-300"}`}>{adminScanFeedback.msg}</div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {!adminCameraActive&&!adminGunMode&&(
+                    <div className="flex gap-2">
+                      <input value={qrIn} onChange={e=>setQrIn(e.target.value)} onKeyDown={e=>e.key==="Enter"&&scanQr()} placeholder="Type Roll Number + Enter" className="flex-1 bg-white/5 border border-white/10 text-white font-mono text-sm rounded-xl px-4 py-3 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+                      <button onClick={scanQr} className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-xl transition-colors"><Check size={16}/></button>
+                    </div>
+                  )}
+                  {adminScanFeedback&&!adminCameraActive&&!adminGunMode&&(
+                    <div className={`rounded-xl p-3 border text-sm ${adminScanFeedback.type==="success"?"bg-emerald-500/10 border-emerald-500/20 text-emerald-300":adminScanFeedback.type==="duplicate"?"bg-amber-500/10 border-amber-500/20 text-amber-300":"bg-red-500/10 border-red-500/20 text-red-300"}`}>{adminScanFeedback.msg}</div>
+                  )}
+                </div>
+                {/* Today's list */}
+                <div className="bg-[#080D18] border border-white/5 rounded-2xl p-5">
+                  <div className="text-xs text-white/30 uppercase tracking-wider mb-3">Today — {todayDate} · {allStudents.filter(s=>state.attendance[todayDate]?.[s.rollNo]).length}/{allStudents.length} present</div>
+                  <div className="space-y-1 max-h-96 overflow-y-auto">
+                    {allStudents.map(st=>{
+                      const present=state.attendance[todayDate]?.[st.rollNo];
+                      return(
+                        <div key={st.id} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
+                          <div className="flex items-center gap-2"><img src={st.photo} className="w-6 h-6 rounded-full"/><span className="text-sm text-white">{st.name}</span><span className="text-xs text-white/30 font-mono">{st.rollNo}</span></div>
+                          <div className="flex items-center gap-2">
+                            <span className={`w-2 h-2 rounded-full ${present?"bg-emerald-400":"bg-white/10"}`}/>
+                            <button onClick={()=>upd(s=>({...s,attendance:{...s.attendance,[todayDate]:{...(s.attendance[todayDate]||{}),[st.rollNo]:!present}}}))} className="text-xs text-white/30 hover:text-white/60 transition-colors">{present?"Undo":"Mark"}</button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+            {adminAttMode==="history"&&(
+              <div className="bg-[#080D18] border border-white/5 rounded-2xl p-5">
+                <div className="text-xs text-white/30 uppercase tracking-wider mb-3">{viewDate} · {allStudents.filter(s=>state.attendance[viewDate]?.[s.rollNo]).length}/{allStudents.length} present</div>
+                <div className="space-y-1">
+                  {allStudents.map(st=>{
+                    const present=state.attendance[viewDate]?.[st.rollNo];
+                    return(
+                      <div key={st.id} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
+                        <div className="flex items-center gap-2"><img src={st.photo} className="w-6 h-6 rounded-full"/><span className="text-sm text-white">{st.name}</span><span className="text-xs text-white/30 font-mono">{st.rollNo}</span></div>
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${present?"bg-emerald-500/20 text-emerald-400":"bg-white/5 text-white/30"}`}>{present?"Present":"Absent"}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
-        </div>
-      );
+        );
+      }
 
       case "ledger":
         if(!lu) return(
@@ -2135,13 +2762,146 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
   function renderPopup(){
     if(!popup)return null;
     const close=()=>setPopup(null);
-    if(popup.type==="addClass"){let n="",sec="",tid="";return<Modal title="Add Class" onClose={close}><Field label="Class Name" onChange={v=>n=v}/><Field label="Section" onChange={v=>sec=v}/><SelField label="Class Teacher" options={state.teachers.map(t=>({value:t.id,label:t.name}))} onChange={v=>tid=v}/><MBtn onClick={async()=>{if(n&&sec){const id=uid();upd(s=>({...s,classes:[...s.classes,{id,name:n,section:sec,teacherId:tid}]}));try{await sb.upsert("classes",{id,name:n,section:sec,teacher_id:tid||null});}catch(e){console.warn("[sb.classes]",e);}close();}}}>Create</MBtn></Modal>;}
+    const data=popup.data;
+    const isEdit=popup.type.startsWith("edit");
+    if(popup.type==="addClass"){return<AddClassModal state={state} sb={sb} upd={upd} close={close}/>;}
     // PHASE 1: Edit existing class teacher
     if(popup.type==="editClass"){const cls=popup.data as Class;let tid=cls.teacherId;return<Modal title={`Edit Class ${cls.name}-${cls.section}`} onClose={close}><SelField label="Class Teacher" options={[{value:"",label:"— Unassigned —"},...state.teachers.map(t=>({value:t.id,label:t.name}))]} onChange={v=>tid=v}/><MBtn onClick={async()=>{upd(s=>({...s,classes:s.classes.map(c=>c.id===cls.id?{...c,teacherId:tid}:c)}));try{await sb.update("classes",cls.id,{teacher_id:tid||null});}catch(e){console.warn("[sb.classes update]",e);}close();}}>Save Changes</MBtn></Modal>;}
     // PHASE 1: Added category field to addSubject
-    if(popup.type==="addSubject"){let n="",code="",tid="",cat:SubjectCategory="General";let cids:string[]=[];return<Modal title="Add Subject" onClose={close}><Field label="Subject Name" onChange={v=>n=v}/><Field label="Code" onChange={v=>code=v.toUpperCase()}/><SelField label="Category" options={(["General","Science","Arts","Commerce"] as SubjectCategory[]).map(c=>({value:c,label:c}))} onChange={v=>cat=v as SubjectCategory}/><SelField label="Teacher" options={state.teachers.map(t=>({value:t.id,label:t.name}))} onChange={v=>tid=v}/><div><label className="text-xs text-white/40 uppercase block mb-2">Classes</label><div className="flex gap-3 flex-wrap">{state.classes.map(c=><label key={c.id} className="flex items-center gap-1.5 text-sm text-white cursor-pointer"><input type="checkbox" className="accent-blue-500" onChange={e=>{if(e.target.checked)cids.push(c.id);else cids=cids.filter(x=>x!==c.id);}}/>{c.name}-{c.section}</label>)}</div></div><MBtn onClick={async()=>{if(n&&code){const id=uid();upd(s=>({...s,subjects:[...s.subjects,{id,name:n,code,classIds:cids,teacherId:tid,category:cat}]}));try{await sb.upsert("subjects",{id,name:n,code,class_ids:cids,teacher_id:tid||null});}catch(e){console.warn("[sb.subjects]",e);}close();}}}>Create</MBtn></Modal>;}
-    if(popup.type==="addTeacher"){let n="",e="",p="";return<Modal title="Add Teacher" onClose={close}><Field label="Full Name" onChange={v=>n=v}/><Field label="Email" onChange={v=>e=v}/><Field label="Password" onChange={v=>p=v}/><MBtn onClick={()=>{if(n&&e){const t:Teacher={id:uid(),name:n,email:e,subjectIds:[],classIds:[],password:p};db.addTeacher(t);close();}}}>Add</MBtn></Modal>;}
-    if(popup.type==="addStudent"){let n="",r="",cid=state.classes[0]?.id||"",p="";return<Modal title="Add Student" onClose={close}><Field label="Full Name" onChange={v=>n=v}/><Field label="Roll Number" onChange={v=>r=v}/><Field label="Password" onChange={v=>p=v}/><SelField label="Class" options={state.classes.map(c=>({value:c.id,label:`Class ${c.name}-${c.section}`}))} onChange={v=>cid=v}/><MBtn onClick={()=>{if(n&&r){const s:Student={id:uid(),name:n,rollNo:r,classId:cid,photo:`https://api.dicebear.com/7.x/avataaars/svg?seed=${n}`,marks:{},password:p};db.addStudent(s);close();}}}>Add</MBtn></Modal>;}
+    if(popup.type==="addSubject"){return <AddSubjectForm state={state} upd={upd} sb={sb} close={close}/>;}
+
+    if(popup.type==="editSubject"){return <EditSubjectForm state={state} upd={upd} sb={sb} close={close} sub={popup.data as Subject}/>;}
+    if(popup.type==="addTeacher"){
+      return(
+        <Modal title="Add Teacher" onClose={close} wide>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Full Name *</label>
+              <input defaultValue={data?.name||""} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,name:e.target.value}}:p)} placeholder="e.g. Mr. John Smith" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+            </div>
+            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Email *</label>
+              <input type="email" defaultValue={data?.email||""} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,email:e.target.value}}:p)} placeholder="teacher@school.edu" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+            </div>
+            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Password *</label>
+              <input type="password" defaultValue={data?.password||""} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,password:e.target.value}}:p)} placeholder="Login password" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+            </div>
+            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Phone</label>
+              <input defaultValue={data?.phone||""} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,phone:e.target.value}}:p)} placeholder="+94 71 234 5678" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+            </div>
+            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Qualification</label>
+              <input defaultValue={data?.qualification||""} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,qualification:e.target.value}}:p)} placeholder="e.g. B.Ed Mathematics" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+            </div>
+            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Specialization</label>
+              <input defaultValue={data?.specialization||""} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,specialization:e.target.value}}:p)} placeholder="e.g. Mathematics" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+            </div>
+          </div>
+          <div><label className="text-xs text-white/40 uppercase block mb-1.5">Assign Subjects</label>
+            <div className="flex gap-2 flex-wrap bg-white/3 border border-white/10 rounded-xl p-3">
+              {state.subjects.length===0&&<span className="text-white/20 text-xs">No subjects yet — add subjects first</span>}
+              {state.subjects.map(s=>{
+                const sel=(data?.subjectIds||[]).includes(s.id);
+                return<button key={s.id} type="button" onClick={()=>setPopup(p=>p?{...p,data:{...p.data,subjectIds:sel?(p.data?.subjectIds||[]).filter((x:string)=>x!==s.id):[...(p.data?.subjectIds||[]),s.id]}}:p)} className={`text-xs px-3 py-1.5 rounded-lg border transition-all ${sel?"bg-blue-600 border-blue-500 text-white":"border-white/10 text-white/40 hover:text-white/70 hover:border-blue-500/30"}`}>{s.code} — {s.name}</button>;
+              })}
+            </div>
+          </div>
+          <div><label className="text-xs text-white/40 uppercase block mb-1.5">Assign Classes</label>
+            <div className="flex gap-2 flex-wrap bg-white/3 border border-white/10 rounded-xl p-3">
+              {state.classes.length===0&&<span className="text-white/20 text-xs">No classes yet — add classes first</span>}
+              {state.classes.map(c=>{
+                const sel=(data?.classIds||[]).includes(c.id);
+                return<button key={c.id} type="button" onClick={()=>setPopup(p=>p?{...p,data:{...p.data,classIds:sel?(p.data?.classIds||[]).filter((x:string)=>x!==c.id):[...(p.data?.classIds||[]),c.id]}}:p)} className={`text-xs px-3 py-1.5 rounded-lg border transition-all ${sel?"bg-emerald-600 border-emerald-500 text-white":"border-white/10 text-white/40 hover:text-white/70 hover:border-emerald-500/30"}`}>Class {c.name}-{c.section}</button>;
+              })}
+            </div>
+          </div>
+          <div><label className="text-xs text-white/40 uppercase block mb-1.5">Profile Photo</label>
+            <div className="flex gap-3 items-center">
+              {data?.photo&&<div className="w-12 h-12 rounded-xl border border-white/10 overflow-hidden flex-shrink-0"><img src={data.photo} className="w-full h-full object-cover"/></div>}
+              <div className="flex-1 flex gap-2">
+                <input defaultValue={data?.photo||""} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,photo:e.target.value}}:p)} placeholder="Photo URL or upload" className="flex-1 bg-white/5 border border-white/10 text-white text-sm rounded-xl px-3 py-2 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+                <label className="flex items-center gap-1 bg-blue-600/20 border border-blue-500/30 text-blue-400 text-xs px-3 py-2 rounded-xl cursor-pointer hover:bg-blue-600/30"><Upload size={11}/>Upload<input type="file" accept="image/*" className="hidden" onChange={async(e:React.ChangeEvent<HTMLInputElement>)=>{const f=e.target.files?.[0];if(!f)return;const r=new FileReader();r.onload=ev=>setPopup(p=>p?{...p,data:{...p.data,photo:ev.target?.result as string}}:p);r.readAsDataURL(f);e.target.value="";}}/></label>
+              </div>
+            </div>
+          </div>
+          <div className="bg-blue-500/5 border border-blue-500/10 rounded-xl px-4 py-3 text-xs text-white/40">
+            Teacher ෙ login ෙ email + password use කරයි. Status: <span className="text-emerald-400 font-medium">approved</span> (admin added)
+          </div>
+          <MBtn onClick={()=>{
+            const n=(data?.name||"").trim(), e=(data?.email||"").trim(), p=(data?.password||"").trim();
+            if(!n||!e||!p){alert("Name, Email and Password are required.");return;}
+            const t:Teacher={id:uid(),name:n,email:e,subjectIds:data?.subjectIds||[],classIds:data?.classIds||[],password:p,photo:data?.photo||`https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(n)}`,status:"approved",profile:{phone:data?.phone,qualification:data?.qualification,specialization:data?.specialization}};
+            db.addTeacher(t);close();
+          }}>Create Teacher Account</MBtn>
+        </Modal>
+      );
+    }
+    if(popup.type==="addStudent"){
+      const forcedClassId=data?._forcedClassId||"";
+      return(
+        <Modal title="Add Student" onClose={close} wide>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Full Name *</label>
+              <input defaultValue={data?.name||""} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,name:e.target.value}}:p)} placeholder="Student full name" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+            </div>
+            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Roll Number *</label>
+              <input defaultValue={data?.rollNo||""} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,rollNo:e.target.value}}:p)} placeholder="e.g. 0001" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+            </div>
+            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Password *</label>
+              <input type="password" defaultValue={data?.password||""} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,password:e.target.value}}:p)} placeholder="Login password" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+            </div>
+            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Class *</label>
+              {forcedClassId
+                ?<div className="bg-white/5 border border-emerald-500/20 text-white text-sm rounded-xl px-4 py-2.5">{(()=>{const c=state.classes.find(x=>x.id===forcedClassId);return c?`Class ${c.name}-${c.section}`:"—";})()}</div>
+                :<select defaultValue={data?.classId||state.classes[0]?.id||""} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,classId:e.target.value}}:p)} className="w-full bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-3 py-2.5 outline-none focus:border-blue-500/50">
+                  {state.classes.map(c=><option key={c.id} value={c.id}>Class {c.name}-{c.section}</option>)}
+                </select>
+              }
+            </div>
+            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Date of Birth</label>
+              <input type="date" defaultValue={data?.dob||""} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,dob:e.target.value}}:p)} className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50"/>
+            </div>
+            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Gender</label>
+              <select defaultValue={data?.gender||""} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,gender:e.target.value}}:p)} className="w-full bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-3 py-2.5 outline-none">
+                <option value="">— Select —</option><option value="Male">Male</option><option value="Female">Female</option><option value="Other">Other</option>
+              </select>
+            </div>
+            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Parent Name</label>
+              <input defaultValue={data?.parentName||""} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,parentName:e.target.value}}:p)} placeholder="Guardian's name" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+            </div>
+            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Parent Phone</label>
+              <input defaultValue={data?.parentPhone||""} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,parentPhone:e.target.value}}:p)} placeholder="+94 71 234 5678" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+            </div>
+            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Blood Group</label>
+              <select defaultValue={data?.bloodGroup||""} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,bloodGroup:e.target.value}}:p)} className="w-full bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-3 py-2.5 outline-none">
+                <option value="">— Select —</option>{["A+","A-","B+","B-","AB+","AB-","O+","O-"].map(g=><option key={g} value={g}>{g}</option>)}
+              </select>
+            </div>
+            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Address</label>
+              <input defaultValue={data?.address||""} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,address:e.target.value}}:p)} placeholder="Home address" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+            </div>
+          </div>
+          <div><label className="text-xs text-white/40 uppercase block mb-1.5">Profile Photo</label>
+            <div className="flex gap-3 items-center">
+              {data?.photo&&<div className="w-12 h-12 rounded-xl border border-white/10 overflow-hidden flex-shrink-0"><img src={data.photo} className="w-full h-full object-cover"/></div>}
+              <div className="flex-1 flex gap-2">
+                <input defaultValue={data?.photo||""} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,photo:e.target.value}}:p)} placeholder="Photo URL or upload" className="flex-1 bg-white/5 border border-white/10 text-white text-sm rounded-xl px-3 py-2 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+                <label className="flex items-center gap-1 bg-blue-600/20 border border-blue-500/30 text-blue-400 text-xs px-3 py-2 rounded-xl cursor-pointer hover:bg-blue-600/30"><Upload size={11}/>Upload<input type="file" accept="image/*" className="hidden" onChange={async(e:React.ChangeEvent<HTMLInputElement>)=>{const f=e.target.files?.[0];if(!f)return;const r=new FileReader();r.onload=ev=>setPopup(p=>p?{...p,data:{...p.data,photo:ev.target?.result as string}}:p);r.readAsDataURL(f);e.target.value="";}}/></label>
+              </div>
+            </div>
+          </div>
+          <div className="bg-blue-500/5 border border-blue-500/10 rounded-xl px-4 py-3 text-xs text-white/40">
+            Student login: Roll Number + Password. Status: <span className="text-emerald-400 font-medium">approved</span>
+          </div>
+          <MBtn onClick={()=>{
+            const n=(data?.name||"").trim(), r=(data?.rollNo||"").trim(), p=(data?.password||"").trim();
+            const cid=forcedClassId||data?.classId||state.classes[0]?.id||"";
+            if(!n||!r||!p){alert("Name, Roll Number and Password are required.");return;}
+            if(state.students.find(s=>s.rollNo===r)){alert("Roll number already exists.");return;}
+            const profile={dob:data?.dob,gender:data?.gender,parentName:data?.parentName,parentPhone:data?.parentPhone,bloodGroup:data?.bloodGroup,address:data?.address};
+            const s:Student={id:uid(),name:n,rollNo:r,classId:cid,photo:data?.photo||`https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(n)}`,marks:{},password:p,status:"approved",profile};
+            db.addStudent(s);close();
+          }}>Create Student Account</MBtn>
+        </Modal>
+      );
+    }
     if(popup.type==="addSlot"){const{day,period,classId}=popup.data;let sid="",tid="";const csubs=state.subjects.filter(s=>s.classIds.includes(classId));return<Modal title={`Slot — ${day}, P${period}`} onClose={close}><SelField label="Subject" options={csubs.map(s=>({value:s.id,label:s.name}))} onChange={v=>sid=v}/><SelField label="Teacher" options={state.teachers.map(t=>({value:t.id,label:t.name}))} onChange={v=>tid=v}/><MBtn onClick={async()=>{if(sid){const id=uid();upd(s=>({...s,timetable:{...s.timetable,[classId]:[...(s.timetable[classId]||[]),{day,period,subjectId:sid,teacherId:tid}]}}));try{await sb.upsert("timetable",{id,class_id:classId,day,period,subject_id:sid,teacher_id:tid||null});}catch(e){console.warn("[sb.timetable]",e);}close();}}}>Add</MBtn></Modal>;}
     if(popup.type==="addSupportAdmin"){let n="",e="",p="";return<Modal title="Add Support Admin" onClose={close}><Field label="Full Name" onChange={v=>n=v}/><Field label="Email" onChange={v=>e=v}/><Field label="Password" onChange={v=>p=v}/><MBtn onClick={()=>{if(n&&e&&p){upd(s=>({...s,supportAdmins:[...s.supportAdmins,{id:uid(),name:n,email:e,password:p}]}));close();}}}>Create</MBtn></Modal>;}
     return null;
@@ -2151,8 +2911,8 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
     <Layout user={user} state={state} navItems={NAV} activeTab={tab} setTab={setTab} onLogout={onLogout} onBackToSite={onBackToSite}>
       {renderTab()}
       {popup&&<div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={e=>e.target===e.currentTarget&&setPopup(null)}>{renderPopup()}</div>}
-      {editSt&&<div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"><StudentProfileModal student={editSt} state={state} onSave={u=>db.updateStudent(u)} onClose={()=>setEditSt(null)}/></div>}
-      {editTch&&<div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"><TeacherProfileModal teacher={editTch} state={state} onSave={u=>db.updateTeacher(u)} onClose={()=>setEditTch(null)} isAdmin/></div>}
+      {editSt&&<ScrollLockModal onClose={()=>setEditSt(null)}><StudentProfileModal student={editSt} state={state} onSave={u=>db.updateStudent(u)} onClose={()=>setEditSt(null)}/></ScrollLockModal>}
+      {editTch&&<ScrollLockModal onClose={()=>setEditTch(null)}><TeacherProfileModal teacher={editTch} state={state} onSave={u=>db.updateTeacher(u)} onClose={()=>setEditTch(null)} isAdmin/></ScrollLockModal>}
     </Layout>
   );
 }
@@ -2237,6 +2997,7 @@ function TeacherView({user,state,setState,onLogout,onBackToSite,db}:
   const [showAddFee,setShowAddFee] = useState(false);
   const [couClass,setCouClass]   = useState("");
   const [couSearch,setCouSearch] = useState("");
+  const [tvPopup,setTVPopup]     = useState<{type:string;data?:any}|null>(null);
   // Counseling tab state
   const [selSt,setSelSt]   = useState("");
   const [issue,setIssue]   = useState("");
@@ -2440,11 +3201,13 @@ function TeacherView({user,state,setState,onLogout,onBackToSite,db}:
 
   const teacher    = _teacher;  // narrowed: definitely Teacher after guard
   // Derive from subjects/classes (always in sync, not stale stored arrays)
-  const mySubjects = state.subjects.filter(s=>s.teacherId===teacher.id);
+  const mySubjects = state.subjects.filter(s=>(s.teacherIds||[]).includes(teacher.id));
   const myClasses  = state.classes.filter(c=>mySubjects.some(s=>s.classIds.includes(c.id)));
   const myOwnCls   = state.classes.filter(c=>c.teacherId===teacher.id);
 
   const isClassTeacher = myOwnCls.length > 0;
+  const isAdminTeacher = teacher.id==="admin";
+  const canScanQR = isClassTeacher || isAdminTeacher;
   const hasAssignedLab = state.inventory.labs.some(l=>l.assignedTeacherId===teacher.id);
 
   const NAV=[
@@ -2454,8 +3217,8 @@ function TeacherView({user,state,setState,onLogout,onBackToSite,db}:
     {id:"timetable",  label:"My Schedule",    icon:Clock},
     {id:"students",   label:"My Students",    icon:Users},
     {id:"marksheet",  label:"Class Marksheet",icon:BarChart3},
-    // PHASE 3: QR Attendance — visible to all class teachers
-    ...(isClassTeacher ? [{id:"attendance", label:"QR Attendance", icon:QrCode}] : []),
+    // PHASE 3: QR Attendance — visible to class teachers + admin
+    ...(canScanQR ? [{id:"attendance", label:"QR Attendance", icon:QrCode}] : []),
     // PHASE 2: Behavior — visible to all class teachers
     ...(isClassTeacher ? [{id:"behavior",   label:"Behavior Log",  icon:AlertTriangle}] : []),
     // PHASE 4: Fees — class teachers see their class; bursar sees all
@@ -2686,7 +3449,15 @@ function TeacherView({user,state,setState,onLogout,onBackToSite,db}:
       // ✅ My Students — with search box
       case "students": return(
         <div className="space-y-4">
-          <h2 className="text-xl font-bold text-white">My Students</h2>
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <h2 className="text-xl font-bold text-white">My Students</h2>
+            {isClassTeacher&&(
+              <button onClick={()=>setTVPopup({type:"addStudent",data:{_forcedClassId:myOwnCls[0]?.id||""}})}
+                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-2 rounded-lg transition-colors">
+                <Plus size={14}/>Add Student to My Class
+              </button>
+            )}
+          </div>
 
           {/* Search Box */}
           <div className="relative max-w-sm">
@@ -2704,7 +3475,7 @@ function TeacherView({user,state,setState,onLogout,onBackToSite,db}:
           )}
 
           {myClasses.map(cls=>{
-            const clsSubs    = state.subjects.filter(s=>s.classIds.includes(cls.id)&&s.teacherId===teacher.id);
+            const clsSubs    = state.subjects.filter(s=>s.classIds.includes(cls.id)&&(s.teacherIds||[]).includes(teacher.id));
             const clsStudents = state.students
               .filter(s=>s.classId===cls.id)
               .filter(s=>!search||s.name.toLowerCase().includes(search.toLowerCase())||s.rollNo.includes(search));
@@ -2782,11 +3553,13 @@ function TeacherView({user,state,setState,onLogout,onBackToSite,db}:
       // PHASE 3: QR Attendance for class teachers
       case "attendance": {
         const todayDate = new Date().toISOString().split("T")[0];
-        // RBAC: super admin sees all students; class teacher sees own class only
-        const isSuperAdmin = teacher.id==="admin" || (state.teachers.find(t=>t.id===teacher.id)?.id==="admin");
-        const myStudents = myOwnCls.length>0
-          ? state.students.filter(s=>myOwnCls.some(c=>c.id===s.classId))
-          : state.students.filter(s=>s.status!=="pending"); // fallback: all approved
+        // RBAC: admin sees all students; class teacher sees own class only
+        const isSuperAdmin = teacher.id==="admin" || isAdminTeacher;
+        const myStudents = isSuperAdmin
+          ? state.students.filter(s=>s.status!=="pending")
+          : myOwnCls.length>0
+            ? state.students.filter(s=>myOwnCls.some(c=>c.id===s.classId))
+            : state.students.filter(s=>s.status!=="pending");
 
         function showFeedback(type:"success"|"error"|"duplicate", msg:string){
           playBeep(type);
@@ -3013,23 +3786,7 @@ function TeacherView({user,state,setState,onLogout,onBackToSite,db}:
       // PHASE 2: Behavior for class teachers (read-only)
       case "behavior": {
         const myStudentIds=state.students.filter(s=>myOwnCls.some(c=>c.id===s.classId)).map(s=>s.id);
-        const myBehaviorRecs=state.behavior.records.filter(r=>myStudentIds.includes(r.studentId));
-        return(
-          <div className="space-y-4 max-w-3xl">
-            <h2 className="text-xl font-bold text-white">Behavior Log</h2>
-            <div className="text-xs text-white/30 bg-white/3 border border-white/5 rounded-lg px-3 py-2">Showing records for your classes. Contact admin to add or modify entries.</div>
-            {myBehaviorRecs.length===0?<div className="bg-[#080D18] border border-white/5 rounded-xl p-8 text-center text-white/20 text-sm">No behavior records for your classes yet.</div>:(
-              <div className="space-y-3">{myBehaviorRecs.map(rec=>{const st=state.students.find(s=>s.id===rec.studentId);return(
-                <div key={rec.id} className={`bg-[#080D18] border rounded-xl p-4 ${rec.type==="positive"?"border-emerald-500/20":"border-red-500/10"}`}>
-                  <div className="flex items-start gap-3">{st&&<img src={st.photo} className="w-8 h-8 rounded-full"/>}
-                    <div className="flex-1"><div className="flex items-center gap-2 flex-wrap mb-1"><span className="text-sm font-medium text-white">{st?.name}</span><span className={`text-[10px] px-2 py-0.5 rounded-full border font-medium ${rec.type==="positive"?"bg-emerald-500/20 text-emerald-400 border-emerald-500/30":"bg-red-500/15 text-red-400 border-red-500/20"}`}>{rec.severity}</span><span className="text-[10px] text-white/30">{rec.date}</span></div>
-                      <p className="text-sm text-white/60">{rec.description}</p>{rec.actionTaken&&<p className="text-xs text-white/30 mt-1">Action: {rec.actionTaken}</p>}
-                    </div>
-                  </div>
-                </div>);})}</div>
-            )}
-          </div>
-        );
+        return <BehaviorModule state={state} setState={setState} db={db} filterStudentIds={myStudentIds}/>;
       }
 
       // PHASE 4: Fees — class teacher sees their class; bursar sees all
@@ -3184,11 +3941,84 @@ function TeacherView({user,state,setState,onLogout,onBackToSite,db}:
     }
   }
 
+  function tvImgUpload(onUrl:(url:string)=>void){
+    return(e:React.ChangeEvent<HTMLInputElement>)=>{
+      const f=e.target.files?.[0]; if(!f) return;
+      if(f.size>2*1024*1024){alert("Image must be under 2MB");return;}
+      const r=new FileReader(); r.onload=ev=>onUrl(ev.target?.result as string); r.readAsDataURL(f); e.target.value="";
+    };
+  }
+
+  function renderTVPopup(){
+    if(!tvPopup) return null;
+    const {type,data}=tvPopup;
+    const close=()=>setTVPopup(null);
+    const forcedClassId=data?._forcedClassId||"";
+    if(type==="addStudent"){
+      return(
+        <Modal title="Add Student to My Class" onClose={close} wide>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Full Name *</label>
+              <input defaultValue={data?.name||""} onChange={e=>setTVPopup(p=>p?{...p,data:{...p.data,name:e.target.value}}:p)} placeholder="Student full name" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+            </div>
+            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Roll Number *</label>
+              <input defaultValue={data?.rollNo||""} onChange={e=>setTVPopup(p=>p?{...p,data:{...p.data,rollNo:e.target.value}}:p)} placeholder="e.g. 0025" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+            </div>
+            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Password *</label>
+              <input type="password" defaultValue={data?.password||""} onChange={e=>setTVPopup(p=>p?{...p,data:{...p.data,password:e.target.value}}:p)} placeholder="Login password" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+            </div>
+            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Class (Fixed)</label>
+              <div className="bg-white/5 border border-emerald-500/20 text-emerald-400/70 text-sm rounded-xl px-4 py-2.5">{(()=>{const c=state.classes.find(x=>x.id===forcedClassId);return c?`Class ${c.name}-${c.section}`:"My Class";})()}</div>
+            </div>
+            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Parent Name</label>
+              <input defaultValue={data?.parentName||""} onChange={e=>setTVPopup(p=>p?{...p,data:{...p.data,parentName:e.target.value}}:p)} placeholder="Guardian's name" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+            </div>
+            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Parent Phone</label>
+              <input defaultValue={data?.parentPhone||""} onChange={e=>setTVPopup(p=>p?{...p,data:{...p.data,parentPhone:e.target.value}}:p)} placeholder="+94 71 234 5678" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+            </div>
+            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Blood Group</label>
+              <select defaultValue="" onChange={e=>setTVPopup(p=>p?{...p,data:{...p.data,bloodGroup:e.target.value}}:p)} className="w-full bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-3 py-2.5 outline-none">
+                <option value="">— Select —</option>{["A+","A-","B+","B-","AB+","AB-","O+","O-"].map(g=><option key={g}>{g}</option>)}
+              </select>
+            </div>
+            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Gender</label>
+              <select defaultValue="" onChange={e=>setTVPopup(p=>p?{...p,data:{...p.data,gender:e.target.value}}:p)} className="w-full bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-3 py-2.5 outline-none">
+                <option value="">— Select —</option><option>Male</option><option>Female</option><option>Other</option>
+              </select>
+            </div>
+          </div>
+          <div><label className="text-xs text-white/40 uppercase block mb-1.5">Profile Photo</label>
+            <div className="flex gap-3 items-center">
+              {data?.photo&&<div className="w-12 h-12 rounded-xl border border-white/10 overflow-hidden flex-shrink-0"><img src={data.photo} className="w-full h-full object-cover"/></div>}
+              <div className="flex-1 flex gap-2">
+                <input defaultValue={data?.photo||""} onChange={e=>setTVPopup(p=>p?{...p,data:{...p.data,photo:e.target.value}}:p)} placeholder="Photo URL or upload" className="flex-1 bg-white/5 border border-white/10 text-white text-sm rounded-xl px-3 py-2 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+                <label className="flex items-center gap-1 bg-blue-600/20 border border-blue-500/30 text-blue-400 text-xs px-3 py-2 rounded-xl cursor-pointer hover:bg-blue-600/30"><Upload size={11}/>Upload<input type="file" accept="image/*" className="hidden" onChange={tvImgUpload(url=>setTVPopup(p=>p?{...p,data:{...p.data,photo:url}}:p))}/></label>
+              </div>
+            </div>
+          </div>
+          <div className="bg-amber-500/5 border border-amber-500/10 rounded-xl px-4 py-3 text-xs text-amber-400/70">
+            🔒 Class teacher can add students to own class only. Student login: Roll Number + Password.
+          </div>
+          <MBtn onClick={()=>{
+            const n=(data?.name||"").trim(),r=(data?.rollNo||"").trim(),p=(data?.password||"").trim();
+            if(!n||!r||!p){alert("Name, Roll Number and Password are required.");return;}
+            if(state.students.find(s=>s.rollNo===r)){alert("Roll number already exists.");return;}
+            const profile={parentName:data?.parentName,parentPhone:data?.parentPhone,bloodGroup:data?.bloodGroup,gender:data?.gender};
+            const s:Student={id:uid(),name:n,rollNo:r,classId:forcedClassId,photo:data?.photo||`https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(n)}`,marks:{},password:p,status:"approved",profile};
+            db.addStudent(s); close();
+          }}>Add Student</MBtn>
+        </Modal>
+      );
+    }
+    return null;
+  }
+
   return(
-    <Layout user={user} state={state} navItems={NAV} activeTab={tab} setTab={setTab} onLogout={onLogout} onBackToSite={onBackToSite}>
+    <Layout user={user} state={state} navItems={NAV} activeTab={tab} setTab={t=>{setTab(t);setScanFeedback(null);}} onLogout={onLogout} onBackToSite={onBackToSite}>
       {renderTab()}
-      {editSt&&<div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"><StudentProfileModal student={editSt} state={state} onSave={u=>{setState(s=>({...s,students:s.students.map(x=>x.id===u.id?u:x)}));try{sb.update("students",u.id,{name:u.name,roll_no:u.rollNo,class_id:u.classId,photo:u.photo??null,profile:u.profile??null});}catch{}}} onClose={()=>setEditSt(null)}/></div>}
-      {editSelf&&<div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"><TeacherProfileModal teacher={teacher} state={state} onSave={u=>{setState(s=>({...s,teachers:s.teachers.map(x=>x.id===u.id?u:x)}));try{sb.update("teachers",u.id,{name:u.name,email:u.email,photo:u.photo??null,profile:u.profile??null});}catch{}}} onClose={()=>setEditSelf(false)}/></div>}
+      {editSt&&<ScrollLockModal onClose={()=>setEditSt(null)}><StudentProfileModal student={editSt} state={state} onSave={u=>{setState(s=>({...s,students:s.students.map(x=>x.id===u.id?u:x)}));try{sb.update("students",u.id,{name:u.name,roll_no:u.rollNo,class_id:u.classId,photo:u.photo??null,profile:u.profile??null});}catch{}}} onClose={()=>setEditSt(null)}/></ScrollLockModal>}
+      {editSelf&&<ScrollLockModal onClose={()=>setEditSelf(false)}><TeacherProfileModal teacher={teacher} state={state} onSave={u=>{setState(s=>({...s,teachers:s.teachers.map(x=>x.id===u.id?u:x)}));try{sb.update("teachers",u.id,{name:u.name,email:u.email,photo:u.photo??null,profile:u.profile??null});}catch{}}} onClose={()=>setEditSelf(false)}/></ScrollLockModal>}
+      {tvPopup&&<div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={e=>e.target===e.currentTarget&&setTVPopup(null)}>{renderTVPopup()}</div>}
     </Layout>
   );
 }
@@ -3315,6 +4145,7 @@ function StudentView({user,state,setState,onLogout,onBackToSite}:
               <tfoot>
                 <tr className="border-t-2 border-white/10"><td className="px-2 py-3 text-sm font-bold text-white">Total</td><td className="px-2 py-3 text-center font-mono font-bold text-white">{total}/{validMarks.length*100}</td><td className="px-2 py-3 text-center"><span className={`text-lg font-bold font-mono ${gradeColor(grade)}`}>{grade}</span></td></tr>
                 <tr><td className="px-2 py-2 text-xs text-white/40">Average</td><td className="px-2 py-2 text-center font-mono text-sm text-white/60">{avg}%</td><td/></tr>
+                <tr><td className="px-2 py-2 text-xs text-white/40">GPA</td><td className="px-2 py-2 text-center"><span className={`font-mono font-bold text-sm ${gpaColor(calcGPA(avg))}`}>{calcGPA(avg).toFixed(1)}</span><span className="text-white/20 text-xs"> / 4.0</span></td><td/></tr>
               </tfoot>
             </table>
             <GradeKey />
@@ -3394,7 +4225,7 @@ function StudentView({user,state,setState,onLogout,onBackToSite}:
   return(
     <Layout user={user} state={state} navItems={NAV} activeTab={tab} setTab={setTab} onLogout={onLogout} onBackToSite={onBackToSite}>
       {renderTab()}
-      {editSelf&&<div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"><StudentProfileModal student={student} state={state} onSave={u=>{setState(s=>({...s,students:s.students.map(x=>x.id===u.id?u:x)}));try{sb.update("students",u.id,{name:u.name,roll_no:u.rollNo,class_id:u.classId,photo:u.photo??null,profile:u.profile??null});}catch{}}} onClose={()=>setEditSelf(false)}/></div>}
+      {editSelf&&<ScrollLockModal onClose={()=>setEditSelf(false)}><StudentProfileModal student={student} state={state} onSave={u=>{setState(s=>({...s,students:s.students.map(x=>x.id===u.id?u:x)}));try{sb.update("students",u.id,{name:u.name,roll_no:u.rollNo,class_id:u.classId,photo:u.photo??null,profile:u.profile??null});}catch{}}} onClose={()=>setEditSelf(false)}/></ScrollLockModal>}
     </Layout>
   );
 }
@@ -3667,6 +4498,9 @@ function ExamsManager({state,setState}:{state:AppState;setState:(fn:(s:AppState)
   const [selSubject,setSelSubject]=React.useState("");
   const [marks,setMarks]=React.useState<Record<string,string>>({});
   const [saved,setSaved]=React.useState(false);
+  const [confirmDelete,setConfirmDelete]=React.useState<string|null>(null);
+  // exam action modal: {id, action:"delete"|"rename", step:"warn"|"pw"|"rename", pw, newName, err}
+  const [examAction,setExamAction]=React.useState<{id:string;action:"delete"|"rename";step:"warn"|"pw"|"rename";pw:string;newName:string;err:string}|null>(null);
   const years=[...new Set([...state.exams.map(e=>e.year),new Date().getFullYear(),new Date().getFullYear()+1])].sort((a,b)=>b-a);
   const subjectsForClass=state.subjects.filter(s=>s.classIds.includes(selClass));
   const studentsForClass=state.students.filter(s=>s.classId===selClass&&s.status!=="pending");
@@ -3716,9 +4550,17 @@ function ExamsManager({state,setState}:{state:AppState;setState:(fn:(s:AppState)
                 <div className="text-xs text-white/30 font-semibold mb-1.5">{y}</div>
                 <div className="flex gap-1.5 flex-wrap">
                   {state.exams.filter(e=>e.year===y).map(ex=>(
-                    <button key={ex.id} onClick={()=>setSelExam(selExam===ex.id?"":ex.id)} className={`text-xs px-3 py-1.5 rounded-lg border transition-all ${selExam===ex.id?"bg-blue-600/20 border-blue-500/40 text-blue-300":"border-white/10 text-white/50 hover:border-white/20 hover:text-white/70"}`}>
-                      {ex.name}
-                    </button>
+                    <div key={ex.id} className="flex items-center gap-0 group">
+                      <button onClick={()=>setSelExam(selExam===ex.id?"":ex.id)} className={`text-xs px-3 py-1.5 rounded-l-lg border-y border-l transition-all ${selExam===ex.id?"bg-blue-600/20 border-blue-500/40 text-blue-300":"border-white/10 text-white/50 hover:border-white/20 hover:text-white/70"}`}>
+                        {ex.name}
+                      </button>
+                      <button onClick={()=>setExamAction({id:ex.id,action:"rename",step:"warn",pw:"",newName:ex.name,err:""})} title="Rename exam" className={`text-xs px-1.5 py-1.5 border-y border-x-0 transition-all opacity-0 group-hover:opacity-100 ${selExam===ex.id?"border-blue-500/40 text-blue-300/60 hover:bg-blue-500/10":"border-white/10 text-white/30 hover:bg-white/5 hover:text-white/60"}`}>
+                        <Pencil size={10}/>
+                      </button>
+                      <button onClick={()=>setExamAction({id:ex.id,action:"delete",step:"warn",pw:"",newName:"",err:""})} title="Delete exam" className={`text-xs px-1.5 py-1.5 rounded-r-lg border-y border-r transition-all opacity-0 group-hover:opacity-100 ${selExam===ex.id?"border-blue-500/40 text-red-400/60 hover:bg-red-500/10 hover:text-red-400":"border-white/10 text-red-400/40 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/30"}`}>
+                        <Trash2 size={11}/>
+                      </button>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -3726,6 +4568,136 @@ function ExamsManager({state,setState}:{state:AppState;setState:(fn:(s:AppState)
           </div>
         </div>
       )}
+      {/* Exam Action Modal — Delete / Rename with password */}
+      {examAction&&(()=>{
+        const ex=state.exams.find(e=>e.id===examAction.id);
+        const isDelete=examAction.action==="delete";
+        const close=()=>setExamAction(null);
+        const upd=(patch:Partial<typeof examAction>)=>setExamAction(a=>a?{...a,...patch}:a);
+        const accentBorder=isDelete?"border-red-500/20":"border-blue-500/20";
+        const accentIcon=isDelete?"bg-red-500/10 border-red-500/20":"bg-blue-500/10 border-blue-500/20";
+        const accentText=isDelete?"text-red-400":"text-blue-400";
+        // Step: warn
+        if(examAction.step==="warn") return(
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" onClick={close}>
+            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm"/>
+            <div className={`relative bg-[#0a1020] border ${accentBorder} rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-5`} onClick={e=>e.stopPropagation()}>
+              <div className="flex items-start gap-4">
+                <div className={`w-11 h-11 rounded-xl ${accentIcon} border flex items-center justify-center flex-shrink-0`}>
+                  {isDelete?<Trash2 size={20} className={accentText}/>:<Pencil size={20} className={accentText}/>}
+                </div>
+                <div>
+                  <h3 className="text-white font-bold text-base">{isDelete?"Delete Exam?":"Rename Exam?"}</h3>
+                  <p className="text-white/50 text-sm mt-1">{isDelete?<>Permanently remove <span className="text-white font-medium">"{ex?.name} ({ex?.year})"</span> and all its records.</>:<>Rename <span className="text-white font-medium">"{ex?.name}"</span>.</>}</p>
+                </div>
+              </div>
+              {isDelete&&<div className="bg-amber-500/5 border border-amber-500/15 rounded-xl px-4 py-3 text-xs text-amber-400/80 flex items-center gap-2"><AlertCircle size={13} className="flex-shrink-0"/>All marks entered under this exam will be lost.</div>}
+              <div className="flex gap-3">
+                <button onClick={close} className="flex-1 py-2.5 rounded-xl border border-white/10 text-white/60 text-sm hover:bg-white/5 transition-colors font-medium">Cancel</button>
+                <button onClick={()=>upd({step:"pw"})} className={`flex-1 py-2.5 rounded-xl ${isDelete?"bg-red-600 hover:bg-red-500 shadow-red-500/20":"bg-blue-600 hover:bg-blue-500 shadow-blue-500/20"} text-white text-sm font-semibold transition-colors shadow-lg`}>
+                  Continue
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+        // Step: pw (password verify)
+        if(examAction.step==="pw") return(
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" onClick={close}>
+            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm"/>
+            <div className={`relative bg-[#0a1020] border ${accentBorder} rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-5`} onClick={e=>e.stopPropagation()}>
+              <div className="flex items-center gap-3">
+                <div className={`w-9 h-9 rounded-xl ${accentIcon} border flex items-center justify-center flex-shrink-0`}><KeyRound size={16} className={accentText}/></div>
+                <div>
+                  <h3 className="text-white font-semibold text-sm">Admin Verification</h3>
+                  <p className="text-white/40 text-xs">Enter the Exam Manager password to proceed</p>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <input
+                  autoFocus
+                  type="password"
+                  value={examAction.pw}
+                  onChange={e=>upd({pw:e.target.value,err:""})}
+                  onKeyDown={e=>{
+                    if(e.key==="Enter"){
+                      if(examAction.pw===state.settings.pwExam){
+                        if(isDelete) upd({step:"pw"}); // will execute below
+                        else upd({step:"rename"});
+                        // execute delete immediately after pw check
+                        if(isDelete){
+                          setState(s=>({...s,exams:s.exams.filter(ex=>ex.id!==examAction.id),examRecords:s.examRecords.filter(r=>r.examId!==examAction.id)}));
+                          if(selExam===examAction.id) setSelExam("");
+                          close();
+                        } else { upd({step:"rename",err:""}); }
+                      } else { upd({err:"Incorrect password"}); }
+                    }
+                  }}
+                  placeholder="Exam manager password"
+                  className={`w-full bg-white/5 border ${examAction.err?"border-red-500/50":"border-white/10"} text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 font-mono placeholder-white/20`}
+                />
+                {examAction.err&&<p className="text-red-400 text-xs flex items-center gap-1"><XCircle size={11}/>{examAction.err}</p>}
+              </div>
+              <div className="flex gap-3">
+                <button onClick={()=>upd({step:"warn",pw:"",err:""})} className="flex-1 py-2.5 rounded-xl border border-white/10 text-white/60 text-sm hover:bg-white/5 transition-colors font-medium">Back</button>
+                <button onClick={()=>{
+                  if(examAction.pw!==state.settings.pwExam){upd({err:"Incorrect password"});return;}
+                  if(isDelete){
+                    setState(s=>({...s,exams:s.exams.filter(ex=>ex.id!==examAction.id),examRecords:s.examRecords.filter(r=>r.examId!==examAction.id)}));
+                    if(selExam===examAction.id) setSelExam("");
+                    close();
+                  } else { upd({step:"rename",err:""}); }
+                }} className={`flex-1 py-2.5 rounded-xl ${isDelete?"bg-red-600 hover:bg-red-500":"bg-blue-600 hover:bg-blue-500"} text-white text-sm font-semibold transition-colors`}>
+                  {isDelete?"Delete":"Next"}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+        // Step: rename (only for rename action)
+        if(examAction.step==="rename") return(
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" onClick={close}>
+            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm"/>
+            <div className="relative bg-[#0a1020] border border-blue-500/20 rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-5" onClick={e=>e.stopPropagation()}>
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center flex-shrink-0"><Pencil size={16} className="text-blue-400"/></div>
+                <div>
+                  <h3 className="text-white font-semibold text-sm">Rename Exam</h3>
+                  <p className="text-white/40 text-xs">{ex?.name} ({ex?.year})</p>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs text-white/40 uppercase font-semibold">New Name</label>
+                <input
+                  autoFocus
+                  value={examAction.newName}
+                  onChange={e=>upd({newName:e.target.value,err:""})}
+                  onKeyDown={e=>{
+                    if(e.key==="Enter"&&examAction.newName.trim()){
+                      setState(s=>({...s,exams:s.exams.map(ex=>ex.id===examAction.id?{...ex,name:examAction.newName.trim()}:ex)}));
+                      close();
+                    }
+                  }}
+                  placeholder="e.g. 1st Term Test"
+                  className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"
+                />
+                {examAction.err&&<p className="text-red-400 text-xs">{examAction.err}</p>}
+              </div>
+              <div className="flex gap-3">
+                <button onClick={close} className="flex-1 py-2.5 rounded-xl border border-white/10 text-white/60 text-sm hover:bg-white/5 transition-colors font-medium">Cancel</button>
+                <button onClick={()=>{
+                  if(!examAction.newName.trim()){upd({err:"Name cannot be empty"});return;}
+                  setState(s=>({...s,exams:s.exams.map(ex=>ex.id===examAction.id?{...ex,name:examAction.newName.trim()}:ex)}));
+                  close();
+                }} className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold transition-colors">
+                  Save Name
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+        return null;
+      })()}
       {/* Enter Marks */}
       {selExam&&(
         <div className="bg-[#080D18] border border-white/5 rounded-2xl p-5 space-y-4">
@@ -4224,7 +5196,7 @@ function InventoryItemForm({initial,labId,labs,onSave,onClose,condCfg}:{initial?
 // ═══════════════════════════════════════════════════════════════════════════════
 // BEHAVIOR / DISCIPLINE MODULE
 // ═══════════════════════════════════════════════════════════════════════════════
-function BehaviorModule({state,setState,db}:{state:AppState;setState:(fn:(s:AppState)=>AppState)=>void;db:DbOps}){
+function BehaviorModule({state,setState,db,filterStudentIds}:{state:AppState;setState:(fn:(s:AppState)=>AppState)=>void;db:DbOps;filterStudentIds?:string[]}){
   const upd=(fn:(b:BehaviorState)=>BehaviorState)=>setState(s=>({...s,behavior:fn(s.behavior)}));
   const [filterSt,setFilterSt]=useState("");
   const [filterType,setFilterType]=useState<"all"|"positive"|"negative">("all");
@@ -4246,6 +5218,7 @@ function BehaviorModule({state,setState,db}:{state:AppState;setState:(fn:(s:AppS
   const CATEGORIES=["Academic","Discipline","Attendance","Bullying","Property","Uniform","Positive Achievement","Community","Other"];
 
   const records=state.behavior.records.filter(r=>{
+    if(filterStudentIds&&!filterStudentIds.includes(r.studentId)) return false;
     const st=state.students.find(s=>s.id===r.studentId);
     if(filterSt&&!st?.name.toLowerCase().includes(filterSt.toLowerCase())&&!st?.rollNo.includes(filterSt)) return false;
     if(filterType!=="all"&&r.type!==filterType) return false;
@@ -4363,7 +5336,7 @@ function BehaviorModule({state,setState,db}:{state:AppState;setState:(fn:(s:AppS
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={e=>e.target===e.currentTarget&&setPopup(null)}>
           <BehaviorForm
             initial={popup.data}
-            students={state.students}
+            students={filterStudentIds?state.students.filter(s=>filterStudentIds.includes(s.id)&&s.status!=="pending"):state.students.filter(s=>s.status!=="pending")}
             classes={state.classes}
             categories={CATEGORIES}
             sevCfg={SEV_CFG}
@@ -4454,7 +5427,7 @@ function SettingsTab({state,upd,isSA,setPopup}:{state:AppState;upd:(fn:(s:AppSta
                 {state.settings.logoUrl?<img src={state.settings.logoUrl} className="w-full h-full object-cover"/>:<School size={22} className="text-white/20"/>}
               </div>
               <div className="flex-1 space-y-2">
-                <label className="flex items-center gap-2 cursor-pointer bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-400 text-xs px-3 py-2 rounded-lg transition-colors w-fit"><Upload size={12}/>Upload Image<input type="file" accept="image/*" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(!f)return;const r=new FileReader();r.onload=ev=>{const logoUrl=ev.target?.result as string;try{localStorage.setItem("school_logo",logoUrl);}catch{}upd(s=>({...s,settings:{...s.settings,logoUrl}}));};r.readAsDataURL(f);}}/></label>
+                <label className="flex items-center gap-2 cursor-pointer bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-400 text-xs px-3 py-2 rounded-lg transition-colors w-fit"><Upload size={12}/>Upload Image<input type="file" accept="image/*" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(!f)return;const r=new FileReader();r.onload=ev=>{const img=new (window.Image as any)();img.onload=()=>{const cv=document.createElement("canvas");const sc=Math.min(1,200/img.width);cv.width=Math.round(img.width*sc);cv.height=Math.round(img.height*sc);cv.getContext("2d")?.drawImage(img,0,0,cv.width,cv.height);const logoUrl=cv.toDataURL("image/png",0.9);try{localStorage.setItem("school_logo",logoUrl);}catch{}upd(s=>({...s,settings:{...s.settings,logoUrl}}));};img.src=ev.target?.result as string;};r.readAsDataURL(f);}}/></label>
                 <input value={state.settings.logoUrl?.startsWith("data:")?"":(state.settings.logoUrl||"")} onChange={e=>{const logoUrl=e.target.value;try{if(logoUrl)localStorage.setItem("school_logo",logoUrl);else localStorage.removeItem("school_logo");}catch{}upd(s=>({...s,settings:{...s.settings,logoUrl}}));}} placeholder="...or paste image URL" className="w-full bg-white/5 border border-white/10 text-white text-xs rounded-lg px-3 py-2 outline-none focus:border-blue-500/50 placeholder-white/20"/>
               </div>
             </div>
@@ -4492,7 +5465,7 @@ function SecurityCenter({state,setState}:{state:AppState;setState:(fn:(s:AppStat
 
   function toggleShow(k:string){setShow(s=>({...s,[k]:!s[k]}));}
 
-  function saveSystemPw(key:"pwAdmin"|"pwCounselor"|"pwStaff",val:string){
+  function saveSystemPw(key:"pwAdmin"|"pwCounselor"|"pwStaff"|"pwExam",val:string){
     if(!val.trim()) return;
     setState(s=>({...s,settings:{...s.settings,[key]:val.trim()}}));
     setSaved(key); setTimeout(()=>setSaved(null),2000);
@@ -4505,10 +5478,11 @@ function SecurityCenter({state,setState}:{state:AppState;setState:(fn:(s:AppStat
     setSaved(labId); setTimeout(()=>setSaved(null),2000);
   }
 
-  const SYS_PW_ROWS:[string,"pwAdmin"|"pwCounselor"|"pwStaff",string,string][]=[
+  const SYS_PW_ROWS:[string,"pwAdmin"|"pwCounselor"|"pwStaff"|"pwExam",string,string][]=[
     ["Admin Login & Result Ledger","pwAdmin","Used to log in as Administrator and unlock the Result Ledger","text-blue-400"],
     ["Counseling Module","pwCounselor","Required to enter the Counseling tab","text-purple-400"],
     ["Finance & Inventory","pwStaff","Required for Fees and Inventory modules","text-emerald-400"],
+    ["Exam Manager","pwExam","Required to delete or rename exams","text-orange-400"],
   ];
 
   return(
@@ -4587,89 +5561,83 @@ function PasswordRow({label,hint,current,accent,showPw,onToggleShow,saved,onSave
 function StaffManager({state,setState}:{state:AppState;setState:(fn:(s:AppState)=>AppState)=>void}){
   const upd=(fn:(c:CMS)=>CMS)=>setState(s=>({...s,cms:fn(s.cms)}));
   const staff=state.cms.staff;
-
-  // Form state
-  const [name,setName]         = useState("");
-  const [desig,setDesig]       = useState("");
-  const [role,setRole]         = useState<StaffRole>("teacher");
-  const [dept,setDept]         = useState("");
-  const [photo,setPhoto]       = useState("");
-  const [photoMode,setPhMode]  = useState<"url"|"upload">("url");
-  const [editId,setEditId]     = useState<string|null>(null);
-  const [msg,setMsg]           = useState("");
-
-  const ROLE_LABELS:Record<StaffRole,string>={
-    principal:"Principal",
-    deputy_principal:"Deputy Principal",
-    assistant_principal:"Assistant Principal",
-    sectional_head:"Sectional Head",
-    teacher:"Class / Subject Teacher",
-  };
-  const ROLE_ORDER:StaffRole[]=["principal","deputy_principal","assistant_principal","sectional_head","teacher"];
-
-  function resetForm(){setName("");setDesig("");setRole("teacher");setDept("");setPhoto("");setEditId(null);}
-
-  function startEdit(m:StaffMember){
-    setName(m.name);setDesig(m.designation);setRole(m.role);setDept(m.department||"");
-    setPhoto(m.photo);setEditId(m.id);setPhMode(m.photo.startsWith("data:")?"upload":"url");
-  }
-
+  const [name,setName]          = useState("");
+  const [desig,setDesig]        = useState("");
+  const [role,setRole]          = useState<StaffRole>("teacher");
+  const [staffType,setStaffType]= useState<StaffType>("academic");
+  const [dept,setDept]          = useState("");
+  const [extraInfo,setExtraInfo]= useState("");
+  const [photo,setPhoto]        = useState("");
+  const [photoMode,setPhMode]   = useState<"url"|"upload">("url");
+  const [editId,setEditId]      = useState<string|null>(null);
+  const [msg,setMsg]            = useState("");
+  const [filterType,setFilterType] = useState<"all"|"academic"|"non_academic">("all");
+  const ROLE_LABELS:Record<StaffRole,string>={principal:"Principal",deputy_principal:"Deputy Principal",assistant_principal:"Assistant Principal",sectional_head:"Sectional Head",grade_head:"Grade Head",subject_head:"Subject Head",class_teacher:"Class Teacher",teacher:"Subject Teacher"};
+  const ROLE_ICONS:Record<StaffRole,string>={principal:"👑",deputy_principal:"🎖️",assistant_principal:"📋",sectional_head:"🏛️",grade_head:"🎓",subject_head:"📚",class_teacher:"🏫",teacher:"👨‍🏫"};
+  const ROLE_ORDER:StaffRole[]=["principal","deputy_principal","assistant_principal","sectional_head","grade_head","subject_head","class_teacher","teacher"];
+  const ROLE_COLORS:Record<StaffRole,string>={principal:"text-amber-400 bg-amber-500/10 border-amber-500/20",deputy_principal:"text-slate-300 bg-slate-500/10 border-slate-500/20",assistant_principal:"text-indigo-400 bg-indigo-500/10 border-indigo-500/20",sectional_head:"text-emerald-400 bg-emerald-500/10 border-emerald-500/20",grade_head:"text-blue-400 bg-blue-500/10 border-blue-500/20",subject_head:"text-yellow-400 bg-yellow-500/10 border-yellow-500/20",class_teacher:"text-teal-400 bg-teal-500/10 border-teal-500/20",teacher:"text-purple-400 bg-purple-500/10 border-purple-500/20"};
+  const NON_ACADEMIC_ROLES=["Caretaker","Driver","Librarian","Lab Assistant","Security","Cleaner","Cook","IT Support","Groundskeeper","Office Clerk","Nurse","Management Assistant","Other"];
+  const extraLabel:Partial<Record<StaffRole,string>>={grade_head:"Grade (e.g. Grade 9)",subject_head:"Subject (e.g. Mathematics)",class_teacher:"Class (e.g. Class 9-A)"};
+  function resetForm(){setName("");setDesig("");setRole("teacher");setStaffType("academic");setDept("");setExtraInfo("");setPhoto("");setEditId(null);}
+  function startEdit(m:StaffMember){setName(m.name);setDesig(m.designation);setRole(m.role);setStaffType(m.staffType||"academic");setDept(m.department||"");setExtraInfo(m.extraInfo||"");setPhoto(m.photo);setEditId(m.id);setPhMode(m.photo.startsWith("data:")?"upload":"url");}
+  function handlePhotoUpload(e:React.ChangeEvent<HTMLInputElement>){const f=e.target.files?.[0];if(!f)return;if(f.size>2*1024*1024){alert("Image must be under 2MB");return;}const r=new FileReader();r.onload=ev=>setPhoto(ev.target?.result as string);r.readAsDataURL(f);}
   function save(){
     if(!name.trim()||!desig.trim()){setMsg("Name and Designation are required.");return;}
-    const entry:StaffMember={id:editId||uid(),name:name.trim(),designation:desig.trim(),role,department:dept.trim()||undefined,photo:photo||`https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`};
+    const finalPhoto=photo||`https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`;
+    const entry:StaffMember={id:editId||uid(),name:name.trim(),designation:desig.trim(),role,staffType,department:dept.trim()||undefined,extraInfo:extraInfo.trim()||undefined,photo:finalPhoto};
+    // If saving a Principal, auto-sync Principal's Message section
+    const isPrincipal = role==="principal" && staffType==="academic";
     if(editId){
-      upd(c=>({...c,staff:c.staff.map(x=>x.id===editId?entry:x)}));
-      setMsg("✓ Staff member updated.");
+      upd(c=>({
+        ...c,
+        staff:c.staff.map(x=>x.id===editId?entry:x),
+        ...(isPrincipal?{principal:{...c.principal,name:name.trim(),title:desig.trim(),photo:finalPhoto}}:{})
+      }));
+      setMsg("✓ Staff member updated."+(isPrincipal?" Principal's Message synced.":""));
     } else {
-      upd(c=>({...c,staff:[...c.staff,entry]}));
-      setMsg("✓ Staff member added.");
+      upd(c=>({
+        ...c,
+        staff:[...c.staff,entry],
+        ...(isPrincipal?{principal:{...c.principal,name:name.trim(),title:desig.trim(),photo:finalPhoto}}:{})
+      }));
+      setMsg("✓ Staff member added."+(isPrincipal?" Principal's Message synced.":""));
     }
-    resetForm();
-    setTimeout(()=>setMsg(""),3000);
+    resetForm();setTimeout(()=>setMsg(""),3000);
   }
-
   function remove(id:string){upd(c=>({...c,staff:c.staff.filter(x=>x.id!==id)}));}
-
+  const academicCount=staff.filter(s=>(s.staffType||"academic")==="academic").length;
+  const nonAcademicCount=staff.filter(s=>s.staffType==="non_academic").length;
+  const filteredByType=filterType==="all"?staff:staff.filter(s=>(s.staffType||"academic")===filterType);
   return(
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div><h2 className="text-xl font-bold text-white">Manage Staff</h2><p className="text-white/30 text-xs mt-0.5">Add, edit, or remove staff members shown on the public Staff Directory page.</p></div>
-        <div className="text-xs text-white/30 bg-white/5 border border-white/10 px-3 py-1.5 rounded-full">{staff.length} members</div>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div><h2 className="text-xl font-bold text-white">Manage Staff</h2><p className="text-white/30 text-xs mt-0.5">Add, edit, or remove staff members shown on the public Staff Directory.</p></div>
+        <div className="flex items-center gap-2 flex-wrap">
+          {(["all","academic","non_academic"] as const).map(t=>(
+            <button key={t} onClick={()=>setFilterType(t)} className={`text-xs px-3 py-1.5 rounded-full border transition-all ${filterType===t?"bg-blue-600 border-blue-500 text-white":"border-white/10 text-white/40 hover:text-white/70"}`}>
+              {t==="all"?`All (${staff.length})`:t==="academic"?`Academic (${academicCount})`:`Non-Academic (${nonAcademicCount})`}
+            </button>
+          ))}
+        </div>
       </div>
-
-      {/* Add / Edit Form */}
       <div className="bg-[#080D18] border border-white/5 rounded-2xl p-5 space-y-4">
         <h3 className="text-sm font-semibold text-white/70">{editId?"Edit Staff Member":"Add New Staff Member"}</h3>
+        <div className="flex gap-2">
+          <button onClick={()=>setStaffType("academic")} className={`flex-1 py-2 rounded-xl border text-sm font-medium transition-all ${staffType==="academic"?"bg-blue-600 border-blue-500 text-white":"border-white/10 text-white/40 hover:border-blue-500/40"}`}>🎓 Academic Staff</button>
+          <button onClick={()=>setStaffType("non_academic")} className={`flex-1 py-2 rounded-xl border text-sm font-medium transition-all ${staffType==="non_academic"?"bg-orange-600 border-orange-500 text-white":"border-white/10 text-white/40 hover:border-orange-500/40"}`}>🔧 Non-Academic Staff</button>
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Name */}
-          <div>
-            <label className="text-xs text-white/40 uppercase tracking-wider block mb-1.5">Full Name *</label>
-            <input value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Dr. Kavindra Perera"
-              className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
-          </div>
-          {/* Designation */}
+          <div><label className="text-xs text-white/40 uppercase tracking-wider block mb-1.5">Full Name *</label><input value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Dr. Kavindra Perera" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/></div>
           <div>
             <label className="text-xs text-white/40 uppercase tracking-wider block mb-1.5">Designation *</label>
-            <input value={desig} onChange={e=>setDesig(e.target.value)} placeholder="e.g. Principal"
-              className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+            {staffType==="non_academic"
+              ?<select value={desig} onChange={e=>setDesig(e.target.value)} className="w-full bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-orange-500/50"><option value="">— Select Role —</option>{NON_ACADEMIC_ROLES.map(r=><option key={r} value={r}>{r}</option>)}</select>
+              :<input value={desig} onChange={e=>setDesig(e.target.value)} placeholder="e.g. Principal" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>}
           </div>
-          {/* Role */}
-          <div>
-            <label className="text-xs text-white/40 uppercase tracking-wider block mb-1.5">Hierarchy Role *</label>
-            <select value={role} onChange={e=>setRole(e.target.value as StaffRole)}
-              className="w-full bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50">
-              {ROLE_ORDER.map(r=><option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
-            </select>
-          </div>
-          {/* Department */}
-          <div>
-            <label className="text-xs text-white/40 uppercase tracking-wider block mb-1.5">Department / Section <span className="text-white/20">(optional)</span></label>
-            <input value={dept} onChange={e=>setDept(e.target.value)} placeholder="e.g. Science, Mathematics…"
-              className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
-          </div>
+          {staffType==="academic"&&(<div><label className="text-xs text-white/40 uppercase tracking-wider block mb-1.5">Hierarchy Role *</label><select value={role} onChange={e=>{setRole(e.target.value as StaffRole);setExtraInfo("");}} className="w-full bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50">{ROLE_ORDER.map(r=><option key={r} value={r}>{ROLE_ICONS[r]} {ROLE_LABELS[r]}</option>)}</select></div>)}
+          <div><label className="text-xs text-white/40 uppercase tracking-wider block mb-1.5">Department / Section</label><input value={dept} onChange={e=>setDept(e.target.value)} placeholder="e.g. Science, Facilities…" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/></div>
+          {staffType==="academic"&&extraLabel[role]&&(<div className="md:col-span-2"><label className="text-xs text-white/40 uppercase tracking-wider block mb-1.5">{extraLabel[role]}</label><input value={extraInfo} onChange={e=>setExtraInfo(e.target.value)} placeholder={role==="grade_head"?"e.g. Grade 9":role==="subject_head"?"e.g. Mathematics":"e.g. Class 9-A"} className="w-full bg-white/5 border border-amber-500/20 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-amber-500/50 placeholder-white/20"/></div>)}
         </div>
-
-        {/* Photo */}
         <div>
           <label className="text-xs text-white/40 uppercase tracking-wider block mb-1.5">Profile Photo</label>
           <div className="flex gap-2 mb-2">
@@ -4677,51 +5645,60 @@ function StaffManager({state,setState}:{state:AppState;setState:(fn:(s:AppState)
             <button onClick={()=>setPhMode("upload")} className={`text-xs px-3 py-1.5 rounded-lg border transition-all ${photoMode==="upload"?"bg-blue-600 border-blue-500 text-white":"border-white/10 text-white/40 hover:text-white/70"}`}>Upload</button>
           </div>
           <div className="flex gap-3 items-center">
-            {/* Preview */}
-            <div className="w-12 h-12 rounded-xl border border-white/10 bg-white/5 flex-shrink-0 overflow-hidden">
-              {photo
-                ?<img src={photo} className="w-full h-full object-cover"/>
-                :<div className="w-full h-full flex items-center justify-center text-white/20"><User size={18}/></div>}
+            <div className="w-14 h-14 rounded-xl border border-white/10 bg-white/5 flex-shrink-0 overflow-hidden relative">
+              {photo?<img src={photo} className="w-full h-full object-cover"/>:<div className="w-full h-full flex items-center justify-center text-white/20"><User size={20}/></div>}
+              {photo&&<button onClick={()=>setPhoto("")} className="absolute top-0.5 right-0.5 w-4 h-4 bg-red-600 rounded-full flex items-center justify-center"><X size={8} className="text-white"/></button>}
             </div>
             {photoMode==="url"
-              ?<input value={photo} onChange={e=>setPhoto(e.target.value)} placeholder="https://example.com/photo.jpg"
-                  className="flex-1 bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
-              :<label className="flex-1 flex items-center justify-center gap-2 border-2 border-dashed border-white/10 hover:border-blue-500/40 text-white/40 hover:text-blue-400 text-sm rounded-xl py-2.5 cursor-pointer transition-all">
-                  <Upload size={14}/>{photo?"Change Photo":"Click to Upload"}
-                  <input type="file" accept="image/*" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(!f)return;const r=new FileReader();r.onload=ev=>setPhoto(ev.target?.result as string);r.readAsDataURL(f);}}/>
-                </label>}
+              ?<input value={photo} onChange={e=>setPhoto(e.target.value)} placeholder="https://example.com/photo.jpg" className="flex-1 bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+              :<label className="flex-1 flex items-center justify-center gap-2 border-2 border-dashed border-white/10 hover:border-blue-500/40 text-white/40 hover:text-blue-400 text-sm rounded-xl py-2.5 cursor-pointer transition-all"><Upload size={14}/>{photo?"Change Photo":"Click to Upload"}<input type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload}/></label>}
           </div>
           <p className="text-white/20 text-xs mt-1.5">Leave blank to use an auto-generated avatar.</p>
         </div>
-
         {msg&&<div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-2.5 text-xs text-emerald-400"><CheckCircle size={12}/>{msg}</div>}
-
         <div className="flex gap-3">
           <button onClick={save} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-sm px-5 py-2.5 rounded-xl transition-colors font-medium"><Save size={14}/>{editId?"Save Changes":"Add Staff Member"}</button>
           {editId&&<button onClick={resetForm} className="border border-white/10 text-white/50 text-sm px-4 py-2.5 rounded-xl hover:bg-white/5 transition-colors">Cancel</button>}
         </div>
       </div>
-
-      {/* Staff List grouped by role */}
-      {ROLE_ORDER.map(r=>{
-        const members=staff.filter(s=>s.role===r);
+      {filterType!=="academic"&&(()=>{
+        const nonAc=filteredByType.filter(s=>s.staffType==="non_academic");
+        if(!nonAc.length) return filterType==="non_academic"?<div className="text-white/20 text-sm text-center py-6">No non-academic staff added yet.</div>:null;
+        return(
+          <div>
+            <div className="flex items-center gap-3 mb-3"><span className="text-base">🔧</span><div className="text-xs font-semibold text-orange-400 uppercase tracking-wider">Non-Academic Staff</div><div className="flex-1 h-px bg-white/5"/><div className="text-xs text-white/20">{nonAc.length}</div></div>
+            <div className="space-y-2">
+              {nonAc.map(m=>(
+                <div key={m.id} className="flex items-center gap-4 bg-[#080D18] border border-white/5 rounded-xl px-4 py-3 hover:border-orange-500/20 transition-colors group">
+                  <div className="w-10 h-10 rounded-full border border-white/10 bg-white/5 flex-shrink-0 overflow-hidden"><img src={m.photo||`https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(m.name)}`} className="w-full h-full object-cover"/></div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-white text-sm font-semibold truncate">{m.name}</div>
+                    <div className="flex items-center gap-2 flex-wrap mt-0.5"><span className="text-xs px-2 py-0.5 rounded-full border text-orange-400 bg-orange-500/10 border-orange-500/20">{m.designation}</span>{m.department&&<span className="text-white/25 text-xs">· {m.department}</span>}</div>
+                  </div>
+                  <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={()=>startEdit(m)} className="w-8 h-8 rounded-lg border border-white/10 hover:border-blue-500/30 flex items-center justify-center"><Edit2 size={12} className="text-white/40 hover:text-blue-400"/></button>
+                    <button onClick={()=>remove(m.id)} className="w-8 h-8 rounded-lg border border-white/10 hover:border-red-500/30 flex items-center justify-center"><Trash2 size={12} className="text-white/40 hover:text-red-400"/></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+      {filterType!=="non_academic"&&ROLE_ORDER.map(r=>{
+        const members=filteredByType.filter(s=>(s.staffType||"academic")==="academic"&&s.role===r);
         if(!members.length) return null;
+        const colorCls=ROLE_COLORS[r];
         return(
           <div key={r}>
-            <div className="flex items-center gap-3 mb-3">
-              <div className="text-xs font-semibold text-white/40 uppercase tracking-wider">{ROLE_LABELS[r]}</div>
-              <div className="flex-1 h-px bg-white/5"/>
-              <div className="text-xs text-white/20">{members.length}</div>
-            </div>
+            <div className="flex items-center gap-3 mb-3"><span className="text-base">{ROLE_ICONS[r]}</span><div className="text-xs font-semibold text-white/40 uppercase tracking-wider">{ROLE_LABELS[r]}</div><div className="flex-1 h-px bg-white/5"/><div className="text-xs text-white/20">{members.length}</div></div>
             <div className="space-y-2">
               {members.map(m=>(
                 <div key={m.id} className="flex items-center gap-4 bg-[#080D18] border border-white/5 rounded-xl px-4 py-3 hover:border-blue-500/20 transition-colors group">
-                  <div className="w-10 h-10 rounded-full border border-white/10 bg-white/5 flex-shrink-0 overflow-hidden">
-                    <img src={m.photo||`https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(m.name)}`} className="w-full h-full object-cover"/>
-                  </div>
+                  <div className="w-10 h-10 rounded-full border border-white/10 bg-white/5 flex-shrink-0 overflow-hidden"><img src={m.photo||`https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(m.name)}`} className="w-full h-full object-cover"/></div>
                   <div className="flex-1 min-w-0">
                     <div className="text-white text-sm font-semibold truncate">{m.name}</div>
-                    <div className="text-white/40 text-xs">{m.designation}{m.department&&<span className="ml-2 text-white/25">· {m.department}</span>}</div>
+                    <div className="flex items-center gap-2 flex-wrap mt-0.5"><span className="text-white/40 text-xs">{m.designation}</span>{m.department&&<span className="text-white/25 text-xs">· {m.department}</span>}{m.extraInfo&&<span className={`text-xs px-2 py-0.5 rounded-full border ${colorCls}`}>{m.extraInfo}</span>}</div>
                   </div>
                   <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button onClick={()=>startEdit(m)} className="w-8 h-8 rounded-lg border border-white/10 hover:border-blue-500/30 flex items-center justify-center"><Edit2 size={12} className="text-white/40 hover:text-blue-400"/></button>
@@ -4774,18 +5751,18 @@ function DownloadsManager({state,setState}:{state:AppState;setState:(fn:(s:AppSt
     if(!urlInput.trim()||!fileName.trim())return;
     const clsObj=state.classes.find(x=>x.id===selClassId);
     const subObj=state.subjects.find(x=>x.id===selSubjectId);
-    upd(c=>({...c,media:[...c.media,{id:uid(),name:fileName.trim(),url:urlInput.trim(),type:fileType,size:"—",uploadedAt:today,category:selCatId||undefined,classId:selClassId||undefined,subjectId:selSubjectId||undefined,className:clsObj?`${clsObj.name}-${clsObj.section}`:undefined,subjectName:subObj?.name}]}));
+    upd(c=>({...c,media:[...c.media,{id:uid(),name:fileName.trim(),url:urlInput.trim(),type:fileType,size:"—",uploadedAt:today,source:"download" as const,category:selCatId||undefined,classId:selClassId||undefined,subjectId:selSubjectId||undefined,className:clsObj?`${clsObj.name}-${clsObj.section}`:undefined,subjectName:subObj?.name}]}));
     setUrl("");setFName("");setMsg("Added!");setTimeout(()=>setMsg(""),2000);
   }
   function addFromFile(f:File,url:string){
     const t=f.type.includes("pdf")?"pdf":"image";
     const clsObj2=state.classes.find(x=>x.id===selClassId);
     const subObj2=state.subjects.find(x=>x.id===selSubjectId);
-    upd(c=>({...c,media:[...c.media,{id:uid(),name:f.name,url,type:t as any,size:`${(f.size/1024).toFixed(1)} KB`,uploadedAt:today,category:selCatId||undefined,classId:selClassId||undefined,subjectId:selSubjectId||undefined,className:clsObj2?`${clsObj2.name}-${clsObj2.section}`:undefined,subjectName:subObj2?.name}]}));
+    upd(c=>({...c,media:[...c.media,{id:uid(),name:f.name,url,type:t as any,size:`${(f.size/1024).toFixed(1)} KB`,uploadedAt:today,source:"download" as const,category:selCatId||undefined,classId:selClassId||undefined,subjectId:selSubjectId||undefined,className:clsObj2?`${clsObj2.name}-${clsObj2.section}`:undefined,subjectName:subObj2?.name}]}));
     setMsg("Uploaded!");setTimeout(()=>setMsg(""),2000);
   }
 
-  const filtered=state.cms.media.filter(m=>filter==="all"||(m.category===filter));
+  const filtered=state.cms.media.filter(m=>(m.source==="download"||(!m.source&&m.category))&&(filter==="all"||(m.category===filter)));
   const subjectsForClass=selClassId?state.subjects.filter(s=>s.classIds.includes(selClassId)):state.subjects;
 
   return(
@@ -4803,7 +5780,9 @@ function DownloadsManager({state,setState}:{state:AppState;setState:(fn:(s:AppSt
         </div>
         <div className="flex gap-2 items-end">
           <div><label className="text-xs text-white/40 block mb-1">Icon</label>
-            <input value={newCatIcon} onChange={e=>setNewCatIcon(e.target.value)} className="w-14 text-center bg-white/5 border border-white/10 text-white text-lg rounded-xl px-2 py-2 outline-none" maxLength={2}/>
+            <select value={newCatIcon} onChange={e=>setNewCatIcon(e.target.value)} className="w-20 text-center bg-white/5 border border-white/10 text-white text-lg rounded-xl px-2 py-2 outline-none cursor-pointer">
+              {["📄","📁","📚","📝","📋","📌","📎","🗂️","📊","📈","📉","🗒️","📓","📔","📒","📕","📗","📘","📙","🖨️","🖇️","✏️","🖊️","🖋️","📐","📏","🔖","🏷️","📦","💾","💿","🎓","🏫","⭐","🔔","📢","📣","🎯","✅","❓","💡","🔑","🗝️","🔒","🧪","🔬","🧬","🧮","🌐","🖥️","📱","⌨️"].map(ic=><option key={ic} value={ic}>{ic}</option>)}
+            </select>
           </div>
           <div className="flex-1"><label className="text-xs text-white/40 block mb-1">Category Name</label>
             <input value={newCatName} onChange={e=>setNewCatName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addCat()} placeholder="e.g. Past Papers, Homework…" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
@@ -4921,17 +5900,34 @@ function CMSAdmin({state,setState}:{state:AppState;setState:(fn:(s:AppState)=>Ap
     {id:"media",     label:"Media Library", icon:FileText},
   ];
 
-  function imgUpload(onUrl:(url:string)=>void){
-    return(e:React.ChangeEvent<HTMLInputElement>)=>{
-      const f=e.target.files?.[0]; if(!f) return;
+  function compressImage(file:File,maxW=1920,quality=0.82):Promise<string>{
+    return new Promise(res=>{
       const r=new FileReader();
       r.onload=ev=>{
-        const url=ev.target?.result as string;
-        // Register in media library
-        upd(c=>({...c,media:[...c.media,{id:uid(),name:f.name,url,type:"image",size:`${(f.size/1024).toFixed(1)}KB`,uploadedAt:today}]}));
-        onUrl(url);
+        const img=new (window.Image as any)();
+        img.onload=()=>{
+          const scale=Math.min(1,maxW/img.width);
+          const w=Math.round(img.width*scale);
+          const h=Math.round(img.height*scale);
+          const cv=document.createElement("canvas");
+          cv.width=w;cv.height=h;
+          const ctx=cv.getContext("2d");
+          ctx?.drawImage(img,0,0,w,h);
+          res(cv.toDataURL("image/jpeg",quality));
+        };
+        img.src=ev.target?.result as string;
       };
-      r.readAsDataURL(f);
+      r.readAsDataURL(file);
+    });
+  }
+
+  function imgUpload(onUrl:(url:string)=>void){
+    return async(e:React.ChangeEvent<HTMLInputElement>)=>{
+      const f=e.target.files?.[0]; if(!f) return;
+      const url=await compressImage(f);
+      // Register in media library
+      upd(c=>({...c,media:[...c.media,{id:uid(),name:f.name,url,type:"image",size:`${(f.size/1024).toFixed(1)}KB`,uploadedAt:today}]}));
+      onUrl(url);
       e.target.value="";
     };
   }
@@ -4986,7 +5982,7 @@ function CMSAdmin({state,setState}:{state:AppState;setState:(fn:(s:AppState)=>Ap
                   <div className="flex items-center gap-2 mb-1">
                     <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono ${n.category==="news"?"bg-blue-500/20 text-blue-400":n.category==="blog"?"bg-purple-500/20 text-purple-400":"bg-amber-500/20 text-amber-400"}`}>{n.category}</span>
                     {n.pinned&&<span className="text-[10px] bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full">📌 Pinned</span>}
-                    <span className="text-xs text-white/30 ml-auto">{n.date}</span>
+                    <span className="text-xs text-white/30 ml-auto" suppressHydrationWarning>{n.date}</span>
                   </div>
                   <div className="text-white text-sm font-semibold">{n.title}</div>
                   <div className="text-white/40 text-xs mt-0.5 line-clamp-1">{n.body.replace(/<[^>]+>/g,"")}</div>
@@ -5008,7 +6004,7 @@ function CMSAdmin({state,setState}:{state:AppState;setState:(fn:(s:AppState)=>Ap
               <div key={a.id} className="flex gap-3 bg-[#080D18] border border-white/5 rounded-xl p-4 group hover:border-yellow-500/20 transition-colors">
                 <img src={a.imageUrl} className="w-16 h-16 rounded-lg object-cover flex-shrink-0"/>
                 <div className="flex-1 min-w-0">
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full ${a.category==="academic"?"bg-blue-500/20 text-blue-400":a.category==="sports"?"bg-emerald-500/20 text-emerald-400":"bg-purple-500/20 text-purple-400"}`}>{a.category} · {a.year}</span>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full ${a.category==="academic"?"bg-blue-500/20 text-blue-400":a.category==="sports"?"bg-emerald-500/20 text-emerald-400":"bg-purple-500/20 text-purple-400"}`} suppressHydrationWarning>{a.category} · {a.year}</span>
                   <div className="text-white text-sm font-semibold mt-1">{a.title}</div>
                   <div className="text-white/40 text-xs line-clamp-2">{a.description}</div>
                 </div>
@@ -5042,9 +6038,9 @@ function CMSAdmin({state,setState}:{state:AppState;setState:(fn:(s:AppState)=>Ap
           <div className="space-y-4 max-w-xl">
             <h3 className="text-white font-bold text-lg">Principal's Message</h3>
             <div className="bg-[#080D18] border border-white/5 rounded-xl p-5 space-y-4">
-              <div className="flex items-center gap-4"><img src={p.photo} className="w-14 h-14 rounded-xl border border-white/10"/><div><div className="text-white font-semibold">{p.name}</div><div className="text-white/40 text-xs">{p.title}</div></div><label className="ml-auto flex items-center gap-1.5 cursor-pointer bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-400 text-xs px-3 py-1.5 rounded-lg"><Upload size={11}/>Photo<input type="file" accept="image/*" className="hidden" onChange={imgUpload(url=>upd(c=>({...c,principal:{...c.principal,photo:url}})))}/></label></div>
-              <div><label className="text-xs text-white/40 uppercase block mb-1.5">Principal's Name</label><input value={p.name} onChange={e=>upd(c=>({...c,principal:{...c.principal,name:e.target.value}}))} className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50"/></div>
-              <div><label className="text-xs text-white/40 uppercase block mb-1.5">Title</label><input value={p.title} onChange={e=>upd(c=>({...c,principal:{...c.principal,title:e.target.value}}))} className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50"/></div>
+              <div className="flex items-center gap-4"><img src={p.photo} className="w-14 h-14 rounded-xl border border-white/10"/><div><div className="text-white font-semibold">{p.name}</div><div className="text-white/40 text-xs">{p.title}</div></div><label className="ml-auto flex items-center gap-1.5 cursor-pointer bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-400 text-xs px-3 py-1.5 rounded-lg"><Upload size={11}/>Photo<input type="file" accept="image/*" className="hidden" onChange={imgUpload(url=>{upd(c=>{const ps=c.staff.find(x=>x.role==="principal"&&(x.staffType||"academic")==="academic");return{...c,principal:{...c.principal,photo:url},staff:ps?c.staff.map(x=>x.id===ps.id?{...x,photo:url}:x):c.staff};});})}/></label></div>
+              <div><label className="text-xs text-white/40 uppercase block mb-1.5">Principal's Name</label><input value={p.name} onChange={e=>{const v=e.target.value;upd(c=>{const ps=c.staff.find(x=>x.role==="principal"&&(x.staffType||"academic")==="academic");return{...c,principal:{...c.principal,name:v},staff:ps?c.staff.map(x=>x.id===ps.id?{...x,name:v}:x):c.staff};});}} className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50"/></div>
+              <div><label className="text-xs text-white/40 uppercase block mb-1.5">Title</label><input value={p.title} onChange={e=>{const v=e.target.value;upd(c=>{const ps=c.staff.find(x=>x.role==="principal"&&(x.staffType||"academic")==="academic");return{...c,principal:{...c.principal,title:v},staff:ps?c.staff.map(x=>x.id===ps.id?{...x,designation:v}:x):c.staff};});}} className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50"/></div>
               <div><label className="text-xs text-white/40 uppercase block mb-1.5">Message (supports HTML tags)</label><RichEditor value={p.text} onChange={v=>upd(c=>({...c,principal:{...c.principal,text:v}}))}/></div>
             </div>
           </div>
@@ -5146,86 +6142,182 @@ function CMSAdmin({state,setState}:{state:AppState;setState:(fn:(s:AppState)=>Ap
       );
     }
     if(popup.type==="addGallery"){
-      let img=data?.imageUrl||"",cap="",cat="Sports";
-      const previewGallery=data?.imageUrl||"";
+      const imgs:string[]=data?.imgs||[];
+      let cap=data?.cap||"",cat=data?.cat||"Sports";
       return(
-        <Modal title="Add Gallery Photo" onClose={close}>
-          <div><label className="text-xs text-white/40 uppercase block mb-1.5">Photo</label>
-            <div className="relative rounded-xl overflow-hidden mb-2 bg-white/5 border border-white/10" style={{height:"140px"}}>
-              {previewGallery
-                ? <img src={previewGallery} className="w-full h-full object-cover"/>
-                : <label className="flex flex-col items-center justify-center w-full h-full cursor-pointer hover:bg-blue-500/5 transition-all group">
-                    <Upload size={20} className="text-white/20 group-hover:text-blue-400 mb-1"/><span className="text-xs text-white/30">Click to upload or drag & drop</span>
-                    <input type="file" accept="image/*" className="hidden" onChange={e=>{
-                      const f=e.target.files?.[0]; if(!f) return;
-                      const r=new FileReader();
-                      r.onload=ev=>{const url=ev.target?.result as string; img=url; setPopup(p=>p?{...p,data:{...p.data,imageUrl:url}}:p);};
-                      r.readAsDataURL(f); e.target.value="";
-                    }}/>
-                  </label>
-              }
-              {previewGallery&&<label className="absolute inset-0 flex items-center justify-center bg-black/50 cursor-pointer opacity-0 hover:opacity-100 transition-opacity">
-                <div className="flex flex-col items-center gap-1"><Upload size={18} className="text-white"/><span className="text-white text-xs">Change</span></div>
-                <input type="file" accept="image/*" className="hidden" onChange={e=>{
-                  const f=e.target.files?.[0]; if(!f) return;
-                  const r=new FileReader();
-                  r.onload=ev=>{const url=ev.target?.result as string; img=url; setPopup(p=>p?{...p,data:{...p.data,imageUrl:url}}:p);};
-                  r.readAsDataURL(f); e.target.value="";
+        <Modal title="Add Gallery Photos" onClose={close} wide>
+          <Field label="Caption (shared for all photos)" defaultValue={cap} onChange={v=>{cap=v; setPopup(p=>p?{...p,data:{...p.data,cap:v}}:p);}}/>
+          <div><label className="text-xs text-white/40 uppercase block mb-1.5">Category</label><select defaultValue={cat} onChange={e=>{cat=e.target.value; setPopup(p=>p?{...p,data:{...p.data,cat:e.target.value}}:p);}} className="w-full bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-3 py-2.5 outline-none">{["Sports","Academic","Cultural","Leadership","Arts","Other"].map(c=><option key={c}>{c}</option>)}</select></div>
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs text-white/40 uppercase">Photos ({imgs.length}/15)</label>
+              {imgs.length<15&&<label className="flex items-center gap-1.5 bg-blue-600/20 border border-blue-500/30 text-blue-400 text-xs px-3 py-1.5 rounded-lg cursor-pointer hover:bg-blue-600/30 transition-colors">
+                <Upload size={11}/>Add Photos
+                <input type="file" accept="image/*" multiple className="hidden" onChange={async e=>{
+                  const files=Array.from(e.target.files||[]).slice(0,15-imgs.length);
+                  const urls:string[]=[];
+                  for(const f of files){const url=await compressImage(f);urls.push(url);upd(c=>({...c,media:[...c.media,{id:uid(),name:f.name,url,type:"image",size:`${(f.size/1024).toFixed(1)}KB`,uploadedAt:today}]}));}
+                  setPopup(p=>p?{...p,data:{...p.data,imgs:[...(p.data?.imgs||[]),...urls].slice(0,15)}}:p);
+                  e.target.value="";
                 }}/>
               </label>}
             </div>
-            <input value={previewGallery} onChange={e=>{img=e.target.value; setPopup(p=>p?{...p,data:{...p.data,imageUrl:e.target.value}}:p);}} placeholder="...or paste URL" className="w-full bg-white/5 border border-white/10 text-white text-xs rounded-xl px-3 py-2 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+            {imgs.length>0
+              ?<div className="grid grid-cols-5 gap-2 max-h-48 overflow-y-auto">
+                {imgs.map((url,i)=>(
+                  <div key={i} className="relative group aspect-square rounded-lg overflow-hidden bg-white/5">
+                    <img src={url} className="w-full h-full object-cover"/>
+                    <button onClick={()=>setPopup(p=>p?{...p,data:{...p.data,imgs:imgs.filter((_,j)=>j!==i)}}:p)} className="absolute top-0.5 right-0.5 w-5 h-5 bg-red-600 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"><X size={10} className="text-white"/></button>
+                  </div>
+                ))}
+              </div>
+              :<label className="flex flex-col items-center justify-center w-full h-24 rounded-xl border-2 border-dashed border-white/10 hover:border-blue-500/30 cursor-pointer transition-colors">
+                <Upload size={18} className="text-white/20 mb-1"/><span className="text-xs text-white/30">Click to select up to 15 photos</span>
+                <input type="file" accept="image/*" multiple className="hidden" onChange={async e=>{
+                  const files=Array.from(e.target.files||[]).slice(0,15);
+                  const urls:string[]=[];
+                  for(const f of files){const url=await compressImage(f);urls.push(url);upd(c=>({...c,media:[...c.media,{id:uid(),name:f.name,url,type:"image",size:`${(f.size/1024).toFixed(1)}KB`,uploadedAt:today}]}));}
+                  setPopup(p=>p?{...p,data:{...p.data,imgs:urls}}:p);
+                  e.target.value="";
+                }}/>
+              </label>
+            }
+            <div className="mt-2"><label className="text-xs text-white/40 uppercase block mb-1">Or paste URL</label><div className="flex gap-2"><input placeholder="https://example.com/photo.jpg" className="flex-1 bg-white/5 border border-white/10 text-white text-xs rounded-xl px-3 py-2 outline-none focus:border-blue-500/50 placeholder-white/20" onKeyDown={e=>{if(e.key==="Enter"){const v=(e.target as HTMLInputElement).value.trim();if(v&&imgs.length<15){setPopup(p=>p?{...p,data:{...p.data,imgs:[...(p.data?.imgs||[]),v]}}:p);(e.target as HTMLInputElement).value="";}}}}/><span className="text-white/20 text-xs self-center">↵ Enter</span></div></div>
           </div>
-          <Field label="Caption" onChange={v=>{cap=v;}}/>
-          <div><label className="text-xs text-white/40 uppercase block mb-1.5">Category</label><select onChange={e=>{cat=e.target.value;}} className="w-full bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-3 py-2.5 outline-none">{["Sports","Academic","Cultural","Leadership","Arts","Other"].map(c=><option key={c}>{c}</option>)}</select></div>
-          <MBtn onClick={()=>{const finalImg=data?.imageUrl||img; if(finalImg&&cap){upd(c=>({...c,gallery:[...c.gallery,{id:uid(),imageUrl:finalImg,caption:cap,category:cat,date:today}]}));close();}else alert("Image and caption required");}}>Add to Gallery</MBtn>
+          <MBtn onClick={()=>{if(imgs.length>0&&cap){imgs.forEach(imageUrl=>upd(c=>({...c,gallery:[...c.gallery,{id:uid(),imageUrl,caption:cap,category:cat,date:today}]})));close();}else alert("Add at least one photo and a caption.");}}>Add {imgs.length||0} Photo{imgs.length!==1?"s":""} to Gallery</MBtn>
         </Modal>
       );
     }
     if(popup.type==="addNews"||popup.type==="editNews"){
-      let t=data?.title||"",auth=data?.author||"",cat=data?.category||"news",img=data?.imageUrl||"",pin=data?.pinned||false;
+      const title=data?.title||""; const imgVal=data?.imageUrl||""; const pinVal=!!data?.pinned;
       return(
         <Modal title={isEdit?"Edit Post":"New Post"} onClose={close} wide>
-          <Field label="Title" onChange={v=>{t=v;}}/>
+          <div><label className="text-xs text-white/40 uppercase block mb-1.5">Title *</label>
+            <input defaultValue={title} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,title:e.target.value}}:p)} placeholder="Post title" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+          </div>
           <div className="grid grid-cols-2 gap-3">
-            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Category</label><select onChange={e=>{cat=e.target.value as any;}} className="w-full bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-3 py-2.5 outline-none"><option value="news">News</option><option value="blog">Blog</option><option value="circular">Circular</option></select></div>
-            <Field label="Author" onChange={v=>{auth=v;}}/>
+            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Category</label>
+              <select defaultValue={data?.category||"news"} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,category:e.target.value}}:p)} className="w-full bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-3 py-2.5 outline-none">
+                <option value="news">News</option><option value="blog">Blog</option><option value="circular">Circular</option>
+              </select>
+            </div>
+            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Author</label>
+              <input defaultValue={data?.author||""} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,author:e.target.value}}:p)} placeholder="Author name" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+            </div>
           </div>
           <div><label className="text-xs text-white/40 uppercase block mb-1.5">Featured Image</label>
-            <div className="flex gap-2"><input value={img} onChange={e=>{img=e.target.value;}} placeholder="Image URL or upload" className="flex-1 bg-white/5 border border-white/10 text-white text-sm rounded-xl px-3 py-2 outline-none focus:border-blue-500/50 placeholder-white/20"/>
-            <label className="flex items-center gap-1 bg-blue-600/20 border border-blue-500/30 text-blue-400 text-xs px-3 py-2 rounded-xl cursor-pointer"><Upload size={11}/>Upload<input type="file" accept="image/*" className="hidden" onChange={imgUpload(url=>{img=url;})}/></label></div>
+            <div className="flex gap-3 items-center">
+              {imgVal&&<div className="w-16 h-16 rounded-lg overflow-hidden border border-white/10 flex-shrink-0"><img src={imgVal} className="w-full h-full object-cover"/></div>}
+              <div className="flex-1 flex gap-2">
+                <input defaultValue={imgVal} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,imageUrl:e.target.value}}:p)} placeholder="Paste image URL" className="flex-1 bg-white/5 border border-white/10 text-white text-sm rounded-xl px-3 py-2 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+                <label className="flex items-center gap-1 bg-blue-600/20 border border-blue-500/30 text-blue-400 text-xs px-3 py-2 rounded-xl cursor-pointer hover:bg-blue-600/30 transition-colors"><Upload size={11}/>Upload<input type="file" accept="image/*" className="hidden" onChange={imgUpload(url=>setPopup(p=>p?{...p,data:{...p.data,imageUrl:url}}:p))}/></label>
+              </div>
+            </div>
           </div>
-          <div><label className="text-xs text-white/40 uppercase block mb-1.5">Content (Rich Text)</label><RichEditor value={richText} onChange={v=>{setRT(v);}}/></div>
-          <MBtn onClick={()=>{if(t){const entry={id:data?.id||uid(),title:t,body:richText,imageUrl:img,category:cat as any,date:today,author:auth,pinned:pin};if(isEdit)upd(c=>({...c,news:c.news.map(x=>x.id===data.id?entry:x)}));else upd(c=>({...c,news:[entry,...c.news]}));close();}}}>Save Post</MBtn>
+          <div><label className="text-xs text-white/40 uppercase block mb-1.5">Content (Rich Text)</label><RichEditor value={richText} onChange={v=>setRT(v)}/></div>
+          <div className="flex items-center gap-3">
+            <button onClick={()=>setPopup(p=>p?{...p,data:{...p.data,pinned:!p.data?.pinned}}:p)} className={`flex items-center gap-2 text-xs px-4 py-2 rounded-xl border transition-all ${pinVal?"bg-amber-500/20 border-amber-500/40 text-amber-400":"border-white/10 text-white/40 hover:border-amber-500/30 hover:text-amber-400"}`}>
+              📌 {pinVal?"Pinned — click to unpin":"Pin this post"}
+            </button>
+          </div>
+          <MBtn onClick={()=>{
+            const finalTitle=(data?.title||"").trim();
+            if(!finalTitle){alert("Title is required.");return;}
+            const entry={id:data?.id||uid(),title:finalTitle,body:richText,imageUrl:data?.imageUrl||"",category:(data?.category||"news") as any,date:today,author:data?.author||"",pinned:!!data?.pinned};
+            if(isEdit)upd(c=>({...c,news:c.news.map(x=>x.id===data.id?entry:x)}));
+            else upd(c=>({...c,news:[entry,...c.news]}));
+            close();
+          }}>Save Post</MBtn>
         </Modal>
       );
     }
     if(popup.type==="addAch"){
-      let t="",desc="",img="",cat="academic",yr=String(new Date().getFullYear());
+      const imgVal=data?.imageUrl||"";
       return(
         <Modal title="Add Achievement" onClose={close}>
-          <Field label="Title" onChange={v=>{t=v;}}/>
-          <Field label="Description" onChange={v=>{desc=v;}}/>
+          <div><label className="text-xs text-white/40 uppercase block mb-1.5">Title *</label>
+            <input defaultValue={data?.title||""} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,title:e.target.value}}:p)} placeholder="Achievement title" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+          </div>
+          <div><label className="text-xs text-white/40 uppercase block mb-1.5">Description *</label>
+            <textarea defaultValue={data?.description||""} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,description:e.target.value}}:p)} placeholder="Describe the achievement" rows={3} className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20 resize-none"/>
+          </div>
           <div className="grid grid-cols-2 gap-3">
-            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Category</label><select onChange={e=>{cat=e.target.value;}} className="w-full bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-3 py-2.5 outline-none"><option value="academic">Academic</option><option value="sports">Sports</option><option value="aesthetic">Aesthetic</option></select></div>
-            <Field label="Year" onChange={v=>{yr=v;}}/>
+            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Category</label>
+              <select defaultValue={data?.category||"academic"} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,category:e.target.value}}:p)} className="w-full bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-3 py-2.5 outline-none">
+                <option value="academic">Academic</option><option value="sports">Sports</option><option value="aesthetic">Aesthetic</option>
+              </select>
+            </div>
+            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Year</label>
+              <input defaultValue={data?.year||String(new Date().getFullYear())} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,year:e.target.value}}:p)} placeholder="2025" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+            </div>
           </div>
           <div><label className="text-xs text-white/40 uppercase block mb-1.5">Image</label>
-            <div className="flex gap-2"><input value={img} onChange={e=>{img=e.target.value;}} placeholder="Image URL" className="flex-1 bg-white/5 border border-white/10 text-white text-sm rounded-xl px-3 py-2 outline-none focus:border-blue-500/50 placeholder-white/20"/><label className="flex items-center gap-1 bg-blue-600/20 border border-blue-500/30 text-blue-400 text-xs px-3 py-2 rounded-xl cursor-pointer"><Upload size={11}/>Upload<input type="file" accept="image/*" className="hidden" onChange={imgUpload(url=>{img=url;})}/></label></div>
+            <div className="flex gap-3 items-center">
+              {imgVal&&<div className="w-14 h-14 rounded-lg overflow-hidden border border-white/10 flex-shrink-0"><img src={imgVal} className="w-full h-full object-cover"/></div>}
+              <div className="flex-1 flex gap-2">
+                <input defaultValue={imgVal} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,imageUrl:e.target.value}}:p)} placeholder="Paste image URL" className="flex-1 bg-white/5 border border-white/10 text-white text-sm rounded-xl px-3 py-2 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+                <label className="flex items-center gap-1 bg-blue-600/20 border border-blue-500/30 text-blue-400 text-xs px-3 py-2 rounded-xl cursor-pointer hover:bg-blue-600/30 transition-colors"><Upload size={11}/>Upload<input type="file" accept="image/*" className="hidden" onChange={imgUpload(url=>setPopup(p=>p?{...p,data:{...p.data,imageUrl:url}}:p))}/></label>
+              </div>
+            </div>
           </div>
-          <MBtn onClick={()=>{if(t&&desc){upd(c=>({...c,achievements:[...c.achievements,{id:uid(),title:t,description:desc,imageUrl:img,category:cat as any,year:yr}]}));close();}else alert("Title and description required");}}>Add Achievement</MBtn>
+          <MBtn onClick={()=>{
+            const finalTitle=(data?.title||"").trim();
+            const finalDesc=(data?.description||"").trim();
+            if(!finalTitle||!finalDesc){alert("Title and description are required.");return;}
+            upd(c=>({...c,achievements:[...c.achievements,{id:uid(),title:finalTitle,description:finalDesc,imageUrl:data?.imageUrl||"",category:(data?.category||"academic") as any,year:data?.year||String(new Date().getFullYear())}]}));
+            close();
+          }}>Add Achievement</MBtn>
         </Modal>
       );
     }
     if(popup.type==="addClub"){
-      let n="",desc="",img="",teacher="",badge="🎯";let members=0;
+      const selBadge=data?.badge||"🎯";
+      const BADGES=["🎯","🏆","🎨","🎭","🎵","🎸","📚","🔬","💻","🤖","🎮","⚽","🏀","🏊","🏋️","🌿","🌍","✈️","🧪","📸","🎬","🗣️","🤝","💡","🔭","📐","🎤","🎻","🏄","🧘","🌟","🦁","🦋","🌺","🍀","🎖️","🛡️","⚡","🌈","🔥","❄️","🎓","📢","🧠","🏅"];
       return(
         <Modal title="Add Club" onClose={close}>
-          <div className="grid grid-cols-4 gap-3"><div className="col-span-3"><Field label="Club Name" onChange={v=>{n=v;}}/></div><div><label className="text-xs text-white/40 uppercase block mb-1.5">Badge</label><input defaultValue="🎯" onChange={e=>{badge=e.target.value;}} className="w-full bg-white/5 border border-white/10 text-white text-2xl text-center rounded-xl px-2 py-1.5 outline-none focus:border-blue-500/50"/></div></div>
-          <Field label="Description" onChange={v=>{desc=v;}}/>
-          <div className="grid grid-cols-2 gap-3"><Field label="Teacher-in-Charge" onChange={v=>{teacher=v;}}/><div><label className="text-xs text-white/40 uppercase block mb-1.5">Members</label><input type="number" defaultValue={0} onChange={e=>{members=parseInt(e.target.value)||0;}} className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-3 py-2.5 outline-none focus:border-blue-500/50"/></div></div>
-          <div><label className="text-xs text-white/40 uppercase block mb-1.5">Club Image</label><div className="flex gap-2"><input value={img} onChange={e=>{img=e.target.value;}} placeholder="Image URL" className="flex-1 bg-white/5 border border-white/10 text-white text-sm rounded-xl px-3 py-2 outline-none focus:border-blue-500/50 placeholder-white/20"/><label className="flex items-center gap-1 bg-blue-600/20 border border-blue-500/30 text-blue-400 text-xs px-3 py-2 rounded-xl cursor-pointer"><Upload size={11}/>Upload<input type="file" accept="image/*" className="hidden" onChange={imgUpload(url=>{img=url;})}/></label></div></div>
-          <MBtn onClick={()=>{if(n&&desc){upd(c=>({...c,clubs:[...c.clubs,{id:uid(),name:n,description:desc,imageUrl:img,teacher,members,badge}]}));close();}else alert("Name and description required");}}>Create Club</MBtn>
+          <div><label className="text-xs text-white/40 uppercase block mb-1.5">Club Name *</label>
+            <input defaultValue={data?.name||""} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,name:e.target.value}}:p)} placeholder="e.g. Science Club" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+          </div>
+          <div><label className="text-xs text-white/40 uppercase block mb-1.5">Badge</label>
+            <div className="bg-white/5 border border-white/10 rounded-xl p-3">
+              <div className="flex items-center gap-3 mb-3">
+                <span className="text-3xl">{selBadge}</span>
+                <span className="text-white/40 text-xs">Selected badge</span>
+              </div>
+              <div className="grid grid-cols-9 gap-1.5 max-h-32 overflow-y-auto">
+                {BADGES.map((b:string)=>(
+                  <button key={b} type="button" onClick={()=>setPopup(p=>p?{...p,data:{...p.data,badge:b}}:p)} className={`text-xl p-1.5 rounded-lg transition-colors ${selBadge===b?"bg-blue-500/30 ring-1 ring-blue-500":"hover:bg-white/10"}`}>{b}</button>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div><label className="text-xs text-white/40 uppercase block mb-1.5">Description *</label>
+            <textarea defaultValue={data?.description||""} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,description:e.target.value}}:p)} placeholder="What is this club about?" rows={2} className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20 resize-none"/>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Teacher-in-Charge</label>
+              <input defaultValue={data?.teacher||""} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,teacher:e.target.value}}:p)} placeholder="Teacher name" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+            </div>
+            <div><label className="text-xs text-white/40 uppercase block mb-1.5">Members</label>
+              <input type="number" defaultValue={0} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,members:parseInt(e.target.value)||0}}:p)} className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-3 py-2.5 outline-none focus:border-blue-500/50"/>
+            </div>
+          </div>
+          <div><label className="text-xs text-white/40 uppercase block mb-1.5">Club Image</label>
+            <div className="flex gap-3 items-center">
+              {data?.imageUrl&&<div className="w-12 h-12 rounded-lg overflow-hidden border border-white/10 flex-shrink-0"><img src={data.imageUrl} className="w-full h-full object-cover"/></div>}
+              <div className="flex-1 flex gap-2">
+                <input defaultValue={data?.imageUrl||""} onChange={e=>setPopup(p=>p?{...p,data:{...p.data,imageUrl:e.target.value}}:p)} placeholder="Paste image URL" className="flex-1 bg-white/5 border border-white/10 text-white text-sm rounded-xl px-3 py-2 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+                <label className="flex items-center gap-1 bg-blue-600/20 border border-blue-500/30 text-blue-400 text-xs px-3 py-2 rounded-xl cursor-pointer hover:bg-blue-600/30"><Upload size={11}/>Upload<input type="file" accept="image/*" className="hidden" onChange={imgUpload(url=>setPopup(p=>p?{...p,data:{...p.data,imageUrl:url}}:p))}/></label>
+              </div>
+            </div>
+          </div>
+          <MBtn onClick={()=>{
+            const finalName=(data?.name||"").trim();
+            const finalDesc=(data?.description||"").trim();
+            if(!finalName||!finalDesc){alert("Club name and description are required.");return;}
+            upd(c=>({...c,clubs:[...c.clubs,{id:uid(),name:finalName,description:finalDesc,imageUrl:data?.imageUrl||"",teacher:data?.teacher||"",members:data?.members||0,badge:data?.badge||"🎯"}]}));
+            close();
+          }}>Create Club</MBtn>
         </Modal>
       );
     }
@@ -5283,20 +6375,68 @@ function RichEditor({value,onChange}:{value:string;onChange:(v:string)=>void}){
 // ═══════════════════════════════════════════════════════════════════════════════
 // PUBLIC WEBSITE
 // ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+// Language Translations (EN / SI)
+// ═══════════════════════════════════════════════════════════════════════════════
+const LANG = {
+  en: {
+    home:"Home", gallery:"Gallery", news:"News", about:"About",
+    achievements:"Achievements", clubs:"Clubs", staff:"Our Staff", downloads:"Downloads",
+    staffLogin:"Staff Login", staffPortal:"Staff Portal",
+    allNews:"All News", viewAll:"View All", allAchievements:"All Achievements",
+    stayUpdated:"Stay Updated", latestNews:"Latest News",
+    ourPride:"Our Pride", recentAchievements:"Recent Achievements",
+    ourPurpose:"Our Purpose", visionMission:"Vision & Mission",
+    vision:"Vision", mission:"Mission",
+    quickLinks:"Quick Links", contact:"Contact",
+    welcomeTo:"Welcome to", exploreMore:"Explore More",
+    learnMore:"Learn More", readMore:"Read More",
+    ourStaff:"Our Staff", meetTeam:"Meet Our Team",
+    principal:"Principal", principalMessage:"Principal's Message",
+    ourGallery:"Our Gallery", photoGallery:"Photo Gallery",
+    ourClubs:"Our Clubs", clubsSocieties:"Clubs & Societies",
+    aboutUs:"About Us", ourSchool:"Our School",
+    heroTagline:"Excellence in Education",
+  },
+  si: {
+    home:"මුල් පිටුව", gallery:"ගැලරිය", news:"ප්‍රවෘත්ති", about:"අප ගැන",
+    achievements:"ජයග්‍රහණ", clubs:"සමාජ", staff:"කාර්ය මණ්ඩලය", downloads:"බාගැනීම්",
+    staffLogin:"කාර්ය මණ්ඩල පිවිසුම", staffPortal:"කාර්ය මණ්ඩල ද්වාරය",
+    allNews:"සියලු ප්‍රවෘත්ති", viewAll:"සියල්ල බලන්න", allAchievements:"සියලු ජයග්‍රහණ",
+    stayUpdated:"යාවත්කාලීන වන්න", latestNews:"නවතම ප්‍රවෘත්ති",
+    ourPride:"අපගේ ගෞරවය", recentAchievements:"මෑත ජයග්‍රහණ",
+    ourPurpose:"අපගේ අරමුණ", visionMission:"දැක්ම සහ මෙහෙවර",
+    vision:"දැක්ම", mission:"මෙහෙවර",
+    quickLinks:"ඉක්මන් සබැඳි", contact:"සම්බන්ධතා",
+    welcomeTo:"සාදරයෙන් පිළිගනිමු", exploreMore:"තව සොයා බලන්න",
+    learnMore:"තව දැනගන්න", readMore:"තව කියවන්න",
+    ourStaff:"අපගේ කාර්ය මණ්ඩලය", meetTeam:"අපගේ කණ්ඩායම",
+    principal:"විදුහල්පති", principalMessage:"විදුහල්පතිගේ පණිවිඩය",
+    ourGallery:"අපගේ ගැලරිය", photoGallery:"ඡායාරූප ගැලරිය",
+    ourClubs:"අපගේ සමාජ", clubsSocieties:"සමාජ සහ සංගම්",
+    aboutUs:"අප ගැන", ourSchool:"අපගේ පාසල",
+    heroTagline:"අධ්‍යාපනයේ විශිෂ්ටත්වය",
+  }
+} as const;
+type Lang = keyof typeof LANG;
+type LangT = typeof LANG[Lang];
+
 function PublicWebsite({state,route,setRoute,onEnterDash}:{state:AppState;route:string;setRoute:(r:string)=>void;onEnterDash:()=>void}){
   const [siteMounted,setSiteMounted]=useState(false);
   React.useEffect(()=>{setSiteMounted(true);},[]);
   const [mobileOpen,setMO]=useState(false);
+  const [lang,setLang]=useState<Lang>("en");
+  const T=LANG[lang];
   const cms=state.cms;
   const PAGES=[
-    {id:"home",label:"Home"},
-    {id:"gallery",label:"Gallery"},
-    {id:"news",label:"News"},
-    {id:"about",label:"About"},
-    {id:"achievements",label:"Achievements"},
-    {id:"clubs",label:"Clubs"},
-    {id:"staff",label:"Our Staff"},
-    {id:"downloads",label:"Downloads"},
+    {id:"home",    label:T.home},
+    {id:"gallery", label:T.gallery},
+    {id:"news",    label:T.news},
+    {id:"about",   label:T.about},
+    {id:"achievements",label:T.achievements},
+    {id:"clubs",   label:T.clubs},
+    {id:"staff",   label:T.staff},
+    {id:"downloads",label:T.downloads},
   ];
 
   function nav(r:string){setRoute(r);setMO(false);window.scrollTo({top:0,behavior:"smooth"});}
@@ -5322,53 +6462,61 @@ function PublicWebsite({state,route,setRoute,onEnterDash}:{state:AppState;route:
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
           <button onClick={()=>nav("home")} className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-lg overflow-hidden flex-shrink-0 bg-[#C9A84C]/20 border border-[#C9A84C]/30 flex items-center justify-center">{(siteMounted&&state.settings.logoUrl)?<img src={state.settings.logoUrl} className="w-full h-full object-cover"/>:<School size={17} className="text-[#C9A84C]"/>}</div>
-            <div className="hidden sm:block"><div className="text-white font-bold text-sm leading-tight" style={{fontFamily:"'Playfair Display',serif"}}>{state.settings.name}</div><div className="text-white/40 text-[10px]">{state.settings.tagline}</div></div>
+            <div className="hidden sm:block"><div className="text-white font-bold text-sm leading-tight" style={{fontFamily:"'Playfair Display',serif"}} suppressHydrationWarning>{state.settings.name}</div><div className="text-white/40 text-[10px]" suppressHydrationWarning>{state.settings.tagline}</div></div>
           </button>
           {/* Desktop nav */}
           <nav className="hidden md:flex items-center gap-1">
             {PAGES.map(p=>(
               <button key={p.id} onClick={()=>nav(p.id)} className={`px-4 py-2 rounded-lg text-sm transition-all font-medium ${route===p.id?"text-[#C9A84C] bg-[#C9A84C]/10":"text-white/60 hover:text-white hover:bg-white/5"}`}>{p.label}</button>
             ))}
-            <button onClick={onEnterDash} className="ml-3 pub-btn px-4 py-2 rounded-lg text-sm transition-all flex items-center gap-2"><Lock size={12}/>Staff Login</button>
+            {/* Language Toggle */}
+            <button onClick={()=>setLang(l=>l==="en"?"si":"en")}
+              className="ml-2 flex items-center gap-1.5 border border-white/20 hover:border-[#C9A84C]/50 text-white/60 hover:text-[#C9A84C] text-xs px-3 py-2 rounded-lg transition-all font-mono font-bold">
+              {lang==="en"?"සිං":"EN"}
+            </button>
+            <button onClick={onEnterDash} className="ml-2 pub-btn px-4 py-2 rounded-lg text-sm transition-all flex items-center gap-2"><Lock size={12}/>{T.staffLogin}</button>
           </nav>
-          <button className="md:hidden text-white/60 hover:text-white" onClick={()=>setMO(o=>!o)}><ChevronDown size={20} className={`transition-transform ${mobileOpen?"rotate-180":""}`}/></button>
+          <div className="md:hidden flex items-center gap-2">
+            <button onClick={()=>setLang(l=>l==="en"?"si":"en")} className="border border-white/20 text-white/60 text-xs px-2.5 py-1.5 rounded-lg font-mono font-bold">{lang==="en"?"සිං":"EN"}</button>
+            <button className="text-white/60 hover:text-white" onClick={()=>setMO(o=>!o)}><ChevronDown size={20} className={`transition-transform ${mobileOpen?"rotate-180":""}`}/></button>
+          </div>
         </div>
         {/* Mobile menu */}
         {mobileOpen&&(
           <div className="md:hidden border-t border-white/10 bg-[#0f1729] px-4 py-3 space-y-1">
             {PAGES.map(p=><button key={p.id} onClick={()=>nav(p.id)} className={`w-full text-left px-4 py-2.5 rounded-lg text-sm ${route===p.id?"text-[#C9A84C] bg-[#C9A84C]/10":"text-white/60"}`}>{p.label}</button>)}
-            <button onClick={()=>{onEnterDash();setMO(false);}} className="w-full text-center pub-btn px-4 py-2.5 rounded-lg text-sm mt-2">Staff Login</button>
+            <button onClick={()=>{onEnterDash();setMO(false);}} className="w-full text-center pub-btn px-4 py-2.5 rounded-lg text-sm mt-2">{T.staffLogin}</button>
           </div>
         )}
       </header>
 
       {/* Page content */}
       <div className="anim-fade">
-        {route==="home"       &&<PageHome     cms={cms} onNav={nav} settings={state.settings}/>}
-        {route==="gallery"    &&<PageGallery  cms={cms}/>}
-        {route==="news"       &&<PageNews     cms={cms}/>}
-        {route==="about"      &&<PageAbout    cms={cms} settings={state.settings}/>}
-        {route==="achievements"&&<PageAchievements cms={cms}/>}
-        {route==="clubs"      &&<PageClubs    cms={cms}/>}
-        {route==="staff"      &&<PageStaff    cms={cms}/>}
-        {route==="downloads"  &&<PageDownloads cms={cms} state={state}/>}
+        {route==="home"        &&<PageHome     cms={cms} onNav={nav} settings={state.settings} T={T}/>}
+        {route==="gallery"     &&<PageGallery  cms={cms} T={T}/>}
+        {route==="news"        &&<PageNews     cms={cms} T={T}/>}
+        {route==="about"       &&<PageAbout    cms={cms} settings={state.settings} T={T}/>}
+        {route==="achievements"&&<PageAchievements cms={cms} T={T}/>}
+        {route==="clubs"       &&<PageClubs    cms={cms} T={T}/>}
+        {route==="staff"       &&<PageStaff    cms={cms} T={T}/>}
+        {route==="downloads"   &&<PageDownloads cms={cms} state={state} T={T}/>}
       </div>
 
       {/* Footer */}
       <footer className="bg-[#0f1729] text-white/50 py-12 mt-16">
         <div className="max-w-7xl mx-auto px-6 grid grid-cols-1 md:grid-cols-3 gap-8">
-          <div><div className="flex items-center gap-3 mb-3"><div className="w-8 h-8 rounded-lg bg-[#C9A84C]/20 flex items-center justify-center overflow-hidden">{(siteMounted&&state.settings.logoUrl)?<img src={state.settings.logoUrl} className="w-full h-full object-cover"/>:<School size={15} className="text-[#C9A84C]"/>}</div><span className="text-white font-bold" style={{fontFamily:"'Playfair Display',serif"}}>{state.settings.name}</span></div><p className="text-sm">{state.settings.tagline}</p></div>
-          <div><h4 className="text-white font-semibold mb-3 text-sm">Quick Links</h4><div className="space-y-1.5">{PAGES.map(p=><button key={p.id} onClick={()=>nav(p.id)} className="block text-sm hover:text-[#C9A84C] transition-colors text-left">{p.label}</button>)}</div></div>
-          <div><h4 className="text-white font-semibold mb-3 text-sm">Contact</h4><p className="text-sm">{cms.visionMission.contact}</p><p className="text-sm mt-1">{cms.visionMission.address}</p><button onClick={onEnterDash} className="mt-3 pub-btn text-xs px-3 py-2 rounded-lg inline-flex items-center gap-1.5"><Lock size={11}/>Staff Portal</button></div>
+          <div><div className="flex items-center gap-3 mb-3"><div className="w-8 h-8 rounded-lg bg-[#C9A84C]/20 flex items-center justify-center overflow-hidden">{(siteMounted&&state.settings.logoUrl)?<img src={state.settings.logoUrl} className="w-full h-full object-cover"/>:<School size={15} className="text-[#C9A84C]"/>}</div><span className="text-white font-bold" style={{fontFamily:"'Playfair Display',serif"}} suppressHydrationWarning>{state.settings.name}</span></div><p className="text-sm" suppressHydrationWarning>{state.settings.tagline}</p></div>
+          <div><h4 className="text-white font-semibold mb-3 text-sm">{T.quickLinks}</h4><div className="space-y-1.5">{PAGES.map(p=><button key={p.id} onClick={()=>nav(p.id)} className="block text-sm hover:text-[#C9A84C] transition-colors text-left">{p.label}</button>)}</div></div>
+          <div><h4 className="text-white font-semibold mb-3 text-sm">{T.contact}</h4><p className="text-sm">{cms.visionMission.contact}</p><p className="text-sm mt-1">{cms.visionMission.address}</p><button onClick={onEnterDash} className="mt-3 pub-btn text-xs px-3 py-2 rounded-lg inline-flex items-center gap-1.5"><Lock size={11}/>{T.staffPortal}</button></div>
         </div>
-        <div className="max-w-7xl mx-auto px-6 mt-8 pt-8 border-t border-white/5 text-center text-xs text-white/20">© 2026 {state.settings.name}. All rights reserved.</div>
+        <div className="max-w-7xl mx-auto px-6 mt-8 pt-8 border-t border-white/5 text-center text-xs text-white/20" suppressHydrationWarning>© 2026 {state.settings.name}. All rights reserved.</div>
       </footer>
     </div>
   );
 }
 
 // ─── Home Page ─────────────────────────────────────────────────────────────────
-function PageHome({cms,onNav,settings}:{cms:CMS;onNav:(r:string)=>void;settings:AppState["settings"]}){
+function PageHome({cms,onNav,settings,T}:{cms:CMS;onNav:(r:string)=>void;settings:AppState["settings"];T:LangT}){
   const [slide,setSlide]=useState(0);
   const [mounted,setMounted]=useState(false);
   React.useEffect(()=>{setMounted(true);},[]);
@@ -5384,7 +6532,7 @@ function PageHome({cms,onNav,settings}:{cms:CMS;onNav:(r:string)=>void;settings:
           ? <div className="absolute inset-0 bg-[#0f1729]"><div className="absolute inset-0" style={{background:"linear-gradient(to right, rgba(15,23,41,0.85) 0%, rgba(15,23,41,0.4) 60%, transparent 100%)"}}/></div>
           : cms.slides.map((sl,i)=>(
             <div key={sl.id} className="absolute inset-0 transition-opacity duration-1000" style={{opacity:i===activeSlide?1:0}}>
-              <img src={sl.imageUrl} className="w-full h-full object-cover"/>
+              <img src={sl.imageUrl} className="w-full h-full object-cover" loading="eager" decoding="async" style={{minHeight:"100%",minWidth:"100%"}}/>
               <div className="absolute inset-0" style={{background:"linear-gradient(to right, rgba(15,23,41,0.85) 0%, rgba(15,23,41,0.4) 60%, transparent 100%)"}}/>
             </div>
           ))}
@@ -5396,7 +6544,7 @@ function PageHome({cms,onNav,settings}:{cms:CMS;onNav:(r:string)=>void;settings:
               <p className="text-white/70 text-lg mb-8" suppressHydrationWarning>{mounted?(cur?.subtitle||""):""}</p>
               <div className="flex gap-3">
                 <button onClick={()=>onNav("about")} className="pub-btn px-6 py-3 rounded-xl text-sm font-bold transition-all hover:scale-105">Explore Our School</button>
-                <button onClick={()=>onNav("news")} className="px-6 py-3 rounded-xl text-sm font-bold border border-white/20 text-white hover:bg-white/10 transition-all">Latest News</button>
+                <button onClick={()=>onNav("news")} className="px-6 py-3 rounded-xl text-sm font-bold border border-white/20 text-white hover:bg-white/10 transition-all">{T.latestNews}</button>
               </div>
             </div>
           </div>
@@ -5433,11 +6581,25 @@ function PageHome({cms,onNav,settings}:{cms:CMS;onNav:(r:string)=>void;settings:
               <h2 className="text-3xl font-bold text-[#0f1729] mb-6 leading-tight" style={{fontFamily:"'Playfair Display',serif"}}>Our Principal's Vision</h2>
               <div className="relative">
                 <div className="text-6xl text-[#C9A84C]/20 font-serif absolute -top-4 -left-2">"</div>
-                <div className="prose text-gray-600 leading-relaxed pl-4" dangerouslySetInnerHTML={{__html:cms.principal.text}}/>
+                <div className="prose text-gray-600 leading-relaxed pl-4" suppressHydrationWarning dangerouslySetInnerHTML={{__html:mounted?cms.principal.text:""}}/>
               </div>
-              <div className="flex items-center gap-4 mt-6">
-                <img src={cms.principal.photo} className="w-14 h-14 rounded-full border-2 border-[#C9A84C]/30 bg-gray-100"/>
-                <div><div className="font-bold text-[#0f1729]" style={{fontFamily:"'Playfair Display',serif"}}>{cms.principal.name}</div><div className="text-gray-500 text-sm">{cms.principal.title}</div></div>
+              <div className="flex items-center gap-5 mt-8">
+                <div className="relative flex-shrink-0">
+                  <div className="w-20 h-20 rounded-full overflow-hidden border-4 border-[#C9A84C]/40 shadow-lg bg-gray-100">
+                    {mounted&&<img src={cms.principal.photo||undefined} className="w-full h-full object-cover object-top"/>}
+                  </div>
+                  <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-[#C9A84C] border-2 border-white flex items-center justify-center">
+                    <svg viewBox="0 0 24 24" className="w-3 h-3 fill-white"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                  </div>
+                </div>
+                <div suppressHydrationWarning>
+                  <div className="font-bold text-[#0f1729] text-lg leading-tight" style={{fontFamily:"'Playfair Display',serif"}} suppressHydrationWarning>{mounted?cms.principal.name:""}</div>
+                  <div className="text-[#C9A84C] text-sm font-medium mt-0.5" suppressHydrationWarning>{mounted?cms.principal.title:""}</div>
+                  <div className="flex items-center gap-1.5 mt-1">
+                    <div className="w-8 h-px bg-[#C9A84C]/40"/>
+                    <div className="w-2 h-px bg-[#C9A84C]/20"/>
+                  </div>
+                </div>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
@@ -5452,10 +6614,10 @@ function PageHome({cms,onNav,settings}:{cms:CMS;onNav:(r:string)=>void;settings:
       {/* Vision & Mission */}
       <section className="bg-[#0f1729] py-16">
         <div className="max-w-7xl mx-auto px-6">
-          <div className="text-center mb-10"><div className="text-[#C9A84C] text-xs font-mono uppercase tracking-[4px] mb-2">Our Purpose</div><h2 className="text-3xl font-bold text-white" style={{fontFamily:"'Playfair Display',serif"}}>Vision & Mission</h2></div>
+          <div className="text-center mb-10"><div className="text-[#C9A84C] text-xs font-mono uppercase tracking-[4px] mb-2">{T.ourPurpose}</div><h2 className="text-3xl font-bold text-white" style={{fontFamily:"'Playfair Display',serif"}}>{T.visionMission}</h2></div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-white/5 border border-white/10 rounded-2xl p-8"><div className="text-[#C9A84C] text-xs font-mono uppercase tracking-[3px] mb-3">Vision</div><p className="text-white/80 leading-relaxed text-lg italic" style={{fontFamily:"'Playfair Display',serif"}}>"{cms.visionMission.vision}"</p></div>
-            <div className="bg-white/5 border border-white/10 rounded-2xl p-8"><div className="text-[#C9A84C] text-xs font-mono uppercase tracking-[3px] mb-3">Mission</div><p className="text-white/80 leading-relaxed text-lg italic" style={{fontFamily:"'Playfair Display',serif"}}>"{cms.visionMission.mission}"</p></div>
+            <div className="bg-white/5 border border-white/10 rounded-2xl p-8"><div className="text-[#C9A84C] text-xs font-mono uppercase tracking-[3px] mb-3">{T.vision}</div><p className="text-white/80 leading-relaxed text-lg italic" style={{fontFamily:"'Playfair Display',serif"}}>"{cms.visionMission.vision}"</p></div>
+            <div className="bg-white/5 border border-white/10 rounded-2xl p-8"><div className="text-[#C9A84C] text-xs font-mono uppercase tracking-[3px] mb-3">{T.mission}</div><p className="text-white/80 leading-relaxed text-lg italic" style={{fontFamily:"'Playfair Display',serif"}}>"{cms.visionMission.mission}"</p></div>
           </div>
         </div>
       </section>
@@ -5463,12 +6625,12 @@ function PageHome({cms,onNav,settings}:{cms:CMS;onNav:(r:string)=>void;settings:
       {/* Latest News preview */}
       <section className="pub-section">
         <div className="max-w-7xl mx-auto px-6">
-          <div className="flex items-end justify-between mb-10"><div><div className="text-[#C9A84C] text-xs font-mono uppercase tracking-[4px] mb-2">Stay Updated</div><h2 className="text-3xl font-bold text-[#0f1729]" style={{fontFamily:"'Playfair Display',serif"}}>Latest News</h2></div><button onClick={()=>onNav("news")} className="pub-btn px-5 py-2.5 rounded-xl text-sm flex items-center gap-2">All News<ChevronRight size={14}/></button></div>
+          <div className="flex items-end justify-between mb-10"><div><div className="text-[#C9A84C] text-xs font-mono uppercase tracking-[4px] mb-2">{T.stayUpdated}</div><h2 className="text-3xl font-bold text-[#0f1729]" style={{fontFamily:"'Playfair Display',serif"}}>Latest News</h2></div><button onClick={()=>onNav("news")} className="pub-btn px-5 py-2.5 rounded-xl text-sm flex items-center gap-2">{T.allNews}<ChevronRight size={14}/></button></div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {cms.news.slice(0,3).map(n=>(
               <article key={n.id} className="pub-card overflow-hidden hover:shadow-xl transition-shadow group">
                 <img src={n.imageUrl} className="w-full h-44 object-cover group-hover:scale-105 transition-transform duration-500"/>
-                <div className="p-5"><div className="flex items-center gap-2 mb-3"><span className={`text-[10px] px-2 py-1 rounded-full font-mono ${n.category==="news"?"bg-blue-100 text-blue-700":n.category==="blog"?"bg-purple-100 text-purple-700":"bg-amber-100 text-amber-700"}`}>{n.category}</span><span className="text-gray-400 text-xs">{n.date}</span></div><h3 className="font-bold text-[#0f1729] mb-2 line-clamp-2">{n.title}</h3><p className="text-gray-500 text-sm line-clamp-2">{n.body.replace(/<[^>]+>/g,"")}</p></div>
+                <div className="p-5"><div className="flex items-center gap-2 mb-3"><span className={`text-[10px] px-2 py-1 rounded-full font-mono ${n.category==="news"?"bg-blue-100 text-blue-700":n.category==="blog"?"bg-purple-100 text-purple-700":"bg-amber-100 text-amber-700"}`}>{n.category}</span><span className="text-gray-400 text-xs" suppressHydrationWarning>{n.date}</span></div><h3 className="font-bold text-[#0f1729] mb-2 line-clamp-2">{n.title}</h3><p className="text-gray-500 text-sm line-clamp-2">{n.body.replace(/<[^>]+>/g,"")}</p></div>
               </article>
             ))}
           </div>
@@ -5478,10 +6640,10 @@ function PageHome({cms,onNav,settings}:{cms:CMS;onNav:(r:string)=>void;settings:
       {/* Achievements preview */}
       <section className="bg-[#F0EBE1] py-16">
         <div className="max-w-7xl mx-auto px-6">
-          <div className="flex items-end justify-between mb-10"><div><div className="text-[#C9A84C] text-xs font-mono uppercase tracking-[4px] mb-2">Our Pride</div><h2 className="text-3xl font-bold text-[#0f1729]" style={{fontFamily:"'Playfair Display',serif"}}>Recent Achievements</h2></div><button onClick={()=>onNav("achievements")} className="pub-btn px-5 py-2.5 rounded-xl text-sm">View All</button></div>
+          <div className="flex items-end justify-between mb-10"><div><div className="text-[#C9A84C] text-xs font-mono uppercase tracking-[4px] mb-2">{T.ourPride}</div><h2 className="text-3xl font-bold text-[#0f1729]" style={{fontFamily:"'Playfair Display',serif"}}>{T.recentAchievements}</h2></div><button onClick={()=>onNav("achievements")} className="pub-btn px-5 py-2.5 rounded-xl text-sm">{T.viewAll}</button></div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {cms.achievements.slice(0,3).map(a=>(
-              <div key={a.id} className="pub-card overflow-hidden hover:shadow-lg transition-shadow"><img src={a.imageUrl} className="w-full h-36 object-cover"/><div className="p-4"><span className={`text-[10px] px-2 py-0.5 rounded-full font-mono ${a.category==="academic"?"bg-blue-100 text-blue-700":a.category==="sports"?"bg-emerald-100 text-emerald-700":"bg-purple-100 text-purple-700"}`}>{a.category} · {a.year}</span><h3 className="font-bold text-[#0f1729] mt-2 text-sm">{a.title}</h3></div></div>
+              <div key={a.id} className="pub-card overflow-hidden hover:shadow-lg transition-shadow"><img src={a.imageUrl} className="w-full h-36 object-cover"/><div className="p-4"><span className={`text-[10px] px-2 py-0.5 rounded-full font-mono ${a.category==="academic"?"bg-blue-100 text-blue-700":a.category==="sports"?"bg-emerald-100 text-emerald-700":"bg-purple-100 text-purple-700"}`} suppressHydrationWarning>{a.category} · {a.year}</span><h3 className="font-bold text-[#0f1729] mt-2 text-sm">{a.title}</h3></div></div>
             ))}
           </div>
         </div>
@@ -5491,14 +6653,14 @@ function PageHome({cms,onNav,settings}:{cms:CMS;onNav:(r:string)=>void;settings:
 }
 
 // ─── Gallery Page ──────────────────────────────────────────────────────────────
-function PageGallery({cms}:{cms:CMS}){
+function PageGallery({cms,T}:{cms:CMS;T:LangT}){
   const [filter,setFilter]=useState("All");
   const [lightbox,setLB]=useState<GalleryItem|null>(null);
   const cats=["All",...Array.from(new Set(cms.gallery.map(g=>g.category)))];
   const shown=filter==="All"?cms.gallery:cms.gallery.filter(g=>g.category===filter);
   return(
     <div>
-      <div className="pub-gradient py-20 text-center"><div className="text-[#C9A84C] text-xs font-mono uppercase tracking-[4px] mb-3">Our Memories</div><h1 className="text-4xl font-bold text-white" style={{fontFamily:"'Playfair Display',serif"}}>Photo Gallery</h1></div>
+      <div className="pub-gradient py-20 text-center"><div className="text-[#C9A84C] text-xs font-mono uppercase tracking-[4px] mb-3">Our Memories</div><h1 className="text-4xl font-bold text-white" style={{fontFamily:"'Playfair Display',serif"}}>{T.photoGallery}</h1></div>
       <section className="pub-section">
         <div className="max-w-7xl mx-auto px-6">
           <div className="flex gap-2 flex-wrap justify-center mb-8">
@@ -5528,7 +6690,7 @@ function PageGallery({cms}:{cms:CMS}){
 }
 
 // ─── News Page ─────────────────────────────────────────────────────────────────
-function PageNews({cms}:{cms:CMS}){
+function PageNews({cms,T}:{cms:CMS;T:LangT}){
   const [filter,setFilter]=useState("all");
   const [selected,setSelected]=useState<NewsPost|null>(null);
   const pinned=cms.news.filter(n=>n.pinned);
@@ -5542,7 +6704,7 @@ function PageNews({cms}:{cms:CMS}){
             <div className="mb-10 bg-amber-50 border border-amber-200 rounded-2xl p-5">
               <div className="text-xs font-mono text-amber-700 uppercase tracking-wider mb-3 flex items-center gap-1.5"><Star size={11}/>Pinned Announcements</div>
               <div className="space-y-2">
-                {pinned.map(n=><div key={n.id} className="flex items-center justify-between bg-white rounded-xl px-4 py-3 border border-amber-100 cursor-pointer hover:border-amber-300 transition-colors" onClick={()=>setSelected(n)}><div className="flex items-center gap-3"><img src={n.imageUrl} className="w-10 h-10 rounded-lg object-cover"/><div><div className="font-semibold text-[#0f1729] text-sm">{n.title}</div><div className="text-gray-400 text-xs">{n.date}</div></div></div><ChevronRight size={14} className="text-gray-400"/></div>)}
+                {pinned.map(n=><div key={n.id} className="flex items-center justify-between bg-white rounded-xl px-4 py-3 border border-amber-100 cursor-pointer hover:border-amber-300 transition-colors" onClick={()=>setSelected(n)}><div className="flex items-center gap-3"><img src={n.imageUrl} className="w-10 h-10 rounded-lg object-cover"/><div><div className="font-semibold text-[#0f1729] text-sm">{n.title}</div><div className="text-gray-400 text-xs" suppressHydrationWarning>{n.date}</div></div></div><ChevronRight size={14} className="text-gray-400"/></div>)}
               </div>
             </div>
           )}
@@ -5553,7 +6715,7 @@ function PageNews({cms}:{cms:CMS}){
             {shown.map(n=>(
               <article key={n.id} className="pub-card overflow-hidden hover:shadow-xl transition-all cursor-pointer group" onClick={()=>setSelected(n)}>
                 <div className="relative overflow-hidden"><img src={n.imageUrl} className="w-full h-44 object-cover group-hover:scale-105 transition-transform duration-500"/>{n.pinned&&<div className="absolute top-3 left-3 bg-amber-400 text-amber-900 text-[10px] font-bold px-2 py-0.5 rounded-full">📌 Pinned</div>}</div>
-                <div className="p-5"><div className="flex items-center gap-2 mb-3"><span className={`text-[10px] px-2.5 py-1 rounded-full font-mono ${n.category==="news"?"bg-blue-100 text-blue-700":n.category==="blog"?"bg-purple-100 text-purple-700":"bg-amber-100 text-amber-700"}`}>{n.category}</span><span className="text-gray-400 text-xs">{n.date}</span></div><h3 className="font-bold text-[#0f1729] mb-2 line-clamp-2 group-hover:text-[#C9A84C] transition-colors">{n.title}</h3><p className="text-gray-500 text-sm line-clamp-3">{n.body.replace(/<[^>]+>/g,"")}</p><div className="mt-3 text-[#C9A84C] text-xs font-semibold flex items-center gap-1">By {n.author}<ChevronRight size={12}/></div></div>
+                <div className="p-5"><div className="flex items-center gap-2 mb-3"><span className={`text-[10px] px-2.5 py-1 rounded-full font-mono ${n.category==="news"?"bg-blue-100 text-blue-700":n.category==="blog"?"bg-purple-100 text-purple-700":"bg-amber-100 text-amber-700"}`}>{n.category}</span><span className="text-gray-400 text-xs" suppressHydrationWarning>{n.date}</span></div><h3 className="font-bold text-[#0f1729] mb-2 line-clamp-2 group-hover:text-[#C9A84C] transition-colors">{n.title}</h3><p className="text-gray-500 text-sm line-clamp-3">{n.body.replace(/<[^>]+>/g,"")}</p><div className="mt-3 text-[#C9A84C] text-xs font-semibold flex items-center gap-1">By {n.author}<ChevronRight size={12}/></div></div>
               </article>
             ))}
           </div>
@@ -5573,7 +6735,7 @@ function PageNews({cms}:{cms:CMS}){
 }
 
 // ─── About Page ────────────────────────────────────────────────────────────────
-function PageAbout({cms,settings}:{cms:CMS;settings:AppState["settings"]}){
+function PageAbout({cms,settings,T}:{cms:CMS;settings:AppState["settings"];T:LangT}){
   const vm=cms.visionMission;
   return(
     <div>
@@ -5598,7 +6760,7 @@ function PageAbout({cms,settings}:{cms:CMS;settings:AppState["settings"]}){
 }
 
 // ─── Achievements Page ─────────────────────────────────────────────────────────
-function PageAchievements({cms}:{cms:CMS}){
+function PageAchievements({cms,T}:{cms:CMS;T:LangT}){
   const [filter,setFilter]=useState("all");
   const cats=["all","academic","sports","aesthetic"];
   const shown=filter==="all"?cms.achievements:cms.achievements.filter(a=>a.category===filter);
@@ -5627,7 +6789,7 @@ function PageAchievements({cms}:{cms:CMS}){
 }
 
 // ─── Clubs Page ────────────────────────────────────────────────────────────────
-function PageClubs({cms}:{cms:CMS}){
+function PageClubs({cms,T}:{cms:CMS;T:LangT}){
   return(
     <div>
       <div className="pub-gradient py-20 text-center"><div className="text-[#C9A84C] text-xs font-mono uppercase tracking-[4px] mb-3">Get Involved</div><h1 className="text-4xl font-bold text-white" style={{fontFamily:"'Playfair Display',serif"}}>Clubs & Societies</h1><p className="text-white/60 mt-3 max-w-lg mx-auto">Discover your passion. Join a club and build skills, friendships, and memories that last a lifetime.</p></div>
@@ -5654,14 +6816,17 @@ function PageClubs({cms}:{cms:CMS}){
 }
 
 // ─── Staff Directory Page ─────────────────────────────────────────────────────
-function PageStaff({cms}:{cms:CMS}){
+function PageStaff({cms,T}:{cms:CMS;T:LangT}){
   // Ordered hierarchy tiers
   const TIERS: {role:StaffRole; label:string; subtitle:string; accent:string; bg:string; border:string; cols:string}[] = [
-    {role:"principal",          label:"Principal",                   subtitle:"Chief Executive of the School",           accent:"text-[#C9A84C]",   bg:"bg-[#C9A84C]/10",   border:"border-[#C9A84C]/30",  cols:"grid-cols-1 max-w-sm mx-auto"},
-    {role:"deputy_principal",   label:"Deputy Principal",            subtitle:"Second-in-Command",                       accent:"text-slate-700",   bg:"bg-slate-100",       border:"border-slate-200",      cols:"grid-cols-1 sm:grid-cols-2 max-w-2xl mx-auto"},
-    {role:"assistant_principal",label:"Assistant Principals",        subtitle:"Academic & Welfare Leadership",           accent:"text-indigo-700",  bg:"bg-indigo-50",       border:"border-indigo-100",     cols:"grid-cols-1 sm:grid-cols-2 max-w-2xl mx-auto"},
-    {role:"sectional_head",     label:"Sectional Heads",             subtitle:"Departmental Academic Leaders",           accent:"text-emerald-700", bg:"bg-emerald-50",      border:"border-emerald-100",    cols:"grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"},
-    {role:"teacher",            label:"Class & Subject Teachers",    subtitle:"The Heart of Our Teaching Community",     accent:"text-blue-700",    bg:"bg-blue-50",         border:"border-blue-100",       cols:"grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"},
+    {role:"principal",           label:"Principal",                  subtitle:"Chief Executive of the School",           accent:"text-[#C9A84C]",   bg:"bg-[#C9A84C]/10",   border:"border-[#C9A84C]/30",  cols:"grid-cols-1 max-w-sm mx-auto"},
+    {role:"deputy_principal",    label:"Deputy Principal",           subtitle:"Second-in-Command",                       accent:"text-slate-700",   bg:"bg-slate-100",       border:"border-slate-200",      cols:"grid-cols-1 sm:grid-cols-2 max-w-2xl mx-auto"},
+    {role:"assistant_principal", label:"Assistant Principals",       subtitle:"Academic & Welfare Leadership",           accent:"text-indigo-700",  bg:"bg-indigo-50",       border:"border-indigo-100",     cols:"grid-cols-1 sm:grid-cols-2 max-w-2xl mx-auto"},
+    {role:"sectional_head",      label:"Sectional Heads",            subtitle:"Departmental Academic Leaders",           accent:"text-emerald-700", bg:"bg-emerald-50",      border:"border-emerald-100",    cols:"grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"},
+    {role:"grade_head",          label:"Grade Heads",                subtitle:"Leaders of Each Academic Grade",          accent:"text-blue-700",    bg:"bg-blue-50",         border:"border-blue-100",       cols:"grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"},
+    {role:"subject_head",        label:"Subject Heads",              subtitle:"Curriculum Leaders by Subject",           accent:"text-yellow-700",  bg:"bg-yellow-50",       border:"border-yellow-100",     cols:"grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"},
+    {role:"class_teacher",       label:"Class Teachers",             subtitle:"Homeroom Guides & Student Mentors",       accent:"text-teal-700",    bg:"bg-teal-50",         border:"border-teal-100",       cols:"grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"},
+    {role:"teacher",             label:"Subject Teachers",           subtitle:"The Heart of Our Teaching Community",     accent:"text-purple-700",  bg:"bg-purple-50",       border:"border-purple-100",     cols:"grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"},
   ];
 
   return(
@@ -5669,7 +6834,7 @@ function PageStaff({cms}:{cms:CMS}){
       {/* Hero */}
       <div className="pub-gradient py-20 text-center">
         <div className="text-[#C9A84C] text-xs font-mono uppercase tracking-[4px] mb-3">Meet the Team</div>
-        <h1 className="text-4xl font-bold text-white" style={{fontFamily:"'Playfair Display',serif"}}>Our Staff</h1>
+        <h1 className="text-4xl font-bold text-white" style={{fontFamily:"'Playfair Display',serif"}}>{T.ourStaff}</h1>
         <p className="text-white/60 mt-3 max-w-xl mx-auto text-sm">Dedicated educators and administrators committed to nurturing every student's potential.</p>
       </div>
 
@@ -5734,6 +6899,14 @@ function PageStaff({cms}:{cms:CMS}){
                           <span className="text-[10px] font-mono text-gray-400 uppercase tracking-wider">{member.department}</span>
                         </div>
                       )}
+                      {/* Extra info (Grade / Subject / Class) */}
+                      {(member as StaffMember).extraInfo&&(
+                        <div className="mt-2">
+                          <span className={`inline-block text-[10px] font-semibold px-2.5 py-1 rounded-full border ${tier.bg} ${tier.border} ${tier.accent}`}>
+                            {(member as StaffMember).extraInfo}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -5752,22 +6925,53 @@ function PageStaff({cms}:{cms:CMS}){
           })}
         </div>
       </section>
+
+      {cms.staff.filter((s:StaffMember)=>s.staffType==="non_academic").length>0&&(
+        <section className="pub-section">
+          <div className="max-w-7xl mx-auto px-6">
+            <div className="text-center mb-10">
+              <div className="inline-flex items-center gap-2 text-xs font-mono uppercase tracking-[3px] px-4 py-2 rounded-full bg-orange-50 border border-orange-100 mb-3">
+                <span className="text-orange-700">🔧 Support Staff</span>
+              </div>
+              <p className="text-gray-400 text-sm">Non-Academic Support Staff</p>
+              <div className="flex items-center gap-4 mt-5 max-w-xs mx-auto"><div className="flex-1 h-px bg-gray-200"/><div className="w-2 h-2 rounded-full bg-orange-50 border border-orange-100"/><div className="flex-1 h-px bg-gray-200"/></div>
+            </div>
+            <div className="grid gap-5 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+              {cms.staff.filter((s:StaffMember)=>s.staffType==="non_academic").map((member:StaffMember)=>(
+                <div key={member.id} className="pub-card p-5 text-center hover:shadow-xl transition-all group">
+                  <div className="relative mx-auto mb-3" style={{width:64,height:64}}>
+                    <div className="w-full h-full rounded-full border-4 border-orange-100 overflow-hidden bg-gray-100 shadow-md">
+                      <img src={member.photo} alt={member.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy"/>
+                    </div>
+                    <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white shadow-sm bg-orange-50 flex items-center justify-center"><div className="w-2 h-2 rounded-full bg-orange-400"/></div>
+                  </div>
+                  <h3 className="font-bold text-[#0f1729] text-sm mb-1">{member.name}</h3>
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-orange-50 border border-orange-100"><span className="text-orange-700">{member.designation}</span></div>
+                  {member.department&&<div className="mt-1.5"><span className="text-[10px] font-mono text-gray-400 uppercase tracking-wider">{member.department}</span></div>}
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
     </div>
   );
 }
 
 // ─── Downloads Page ────────────────────────────────────────────────────────────
-function PageDownloads({cms,state}:{cms:CMS;state?:AppState}){
+function PageDownloads({cms,state,T}:{cms:CMS;state?:AppState;T:LangT}){
   const cats=(cms.downloadCategories)||[];
   const [selCat,setSelCat]=useState<string>("");
   const [selClass,setSelClass]=useState<string>("");
   const [selSubject,setSelSubject]=useState<string>("");
 
   // Classes/subjects visible in public (from uploaded files)
-  const classIds=[...new Set(cms.media.filter(m=>m.classId).map(m=>m.classId!))];
-  const subjectIds=[...new Set(cms.media.filter(m=>m.subjectId&&(!selClass||m.classId===selClass)).map(m=>m.subjectId!))];
+  // Only show files intentionally uploaded to Downloads (source:"download" or legacy items with category)
+  const dlMedia = cms.media.filter(m => m.source==="download" || (!m.source && m.category));
+  const classIds=[...new Set(dlMedia.filter(m=>m.classId).map(m=>m.classId!))];
+  const subjectIds=[...new Set(dlMedia.filter(m=>m.subjectId&&(!selClass||m.classId===selClass)).map(m=>m.subjectId!))];
 
-  const files=cms.media.filter(m=>{
+  const files=dlMedia.filter(m=>{
     if(selCat&&m.category!==selCat) return false;
     if(selClass&&m.classId!==selClass) return false;
     if(selSubject&&m.subjectId!==selSubject) return false;
@@ -5791,7 +6995,7 @@ function PageDownloads({cms,state}:{cms:CMS;state?:AppState}){
                   <h2 className="text-[#1a2540] text-xl font-bold mb-5" style={{fontFamily:"'Playfair Display',serif"}}>Browse by Category</h2>
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
                     {cats.map(cat=>{
-                      const count=cms.media.filter(m=>m.category===cat.id).length;
+                      const count=dlMedia.filter(m=>m.category===cat.id).length;
                       return(
                         <button key={cat.id} onClick={()=>setSelCat(cat.id)} className="bg-[#1a2540] hover:bg-[#1e2d50] border border-white/10 hover:border-[#C9A84C]/40 rounded-2xl p-6 text-center transition-all group shadow-sm">
                           <div className="w-14 h-14 rounded-2xl bg-[#C9A84C]/10 border border-[#C9A84C]/20 flex items-center justify-center mx-auto mb-4 group-hover:bg-[#C9A84C]/20 transition-all">
@@ -5818,11 +7022,11 @@ function PageDownloads({cms,state}:{cms:CMS;state?:AppState}){
                 <div className="text-center py-16 text-white/30">No download categories set up yet.</div>
               )}
               {/* All files without category */}
-              {cms.media.filter(m=>!m.category).length>0&&(
+              {dlMedia.filter(m=>!m.category).length>0&&(
                 <div>
                   <h3 className="text-white/50 text-xs font-semibold uppercase tracking-widest mb-4">Other Files</h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {cms.media.filter(m=>!m.category).map(m=>(
+                    {dlMedia.filter(m=>!m.category).map(m=>(
                       <a key={m.id} href={m.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 bg-[#1a2540]/5 hover:bg-[#1a2540]/10 border border-[#1a2540]/10 hover:border-[#C9A84C]/30 rounded-xl px-4 py-3 transition-all group">
                         <span className="text-xl">{m.type==="pdf"?"📄":"🖼️"}</span>
                         <div className="flex-1 min-w-0"><div className="text-[#1a2540] text-sm truncate">{m.name}</div><div className="text-[#1a2540]/40 text-xs">{m.uploadedAt}</div></div>
@@ -5838,7 +7042,7 @@ function PageDownloads({cms,state}:{cms:CMS;state?:AppState}){
           {/* Category selected: show filters + files */}
           {selCat&&(()=>{
             const cat=cats.find(x=>x.id===selCat);
-            const catFiles=cms.media.filter(m=>m.category===selCat);
+            const catFiles=dlMedia.filter(m=>m.category===selCat);
             const catClassIds=[...new Set(catFiles.filter(m=>m.classId).map(m=>m.classId!))];
             const filteredFiles=catFiles.filter(m=>{
               if(selClass&&m.classId!==selClass) return false;
@@ -6048,14 +7252,25 @@ export default function SchoolERP() {
       } catch {}
       // 2. Settings backup — tiny JSON without logo, never hits quota, used as reload fallback
       try { localStorage.setItem("erp_settings_bak", JSON.stringify({...next.settings, logoUrl:""})); } catch {}
-      // 3. Full state — strip base64 logo (already safe in school_logo key)
+      // 3. Full state — strip base64 logo + keep media (media with base64 saved separately)
       try {
-        const toSave = next.settings.logoUrl?.startsWith("data:")
-          ? { ...next, settings: { ...next.settings, logoUrl: "" } }
-          : next;
+        const toSave = {
+          ...next,
+          settings: { ...next.settings, logoUrl: next.settings.logoUrl?.startsWith("data:") ? "" : (next.settings.logoUrl || "") },
+        };
         localStorage.setItem(STATE_KEY, JSON.stringify(toSave));
-      } catch {}
-      // 4. Debounce Supabase config save
+      } catch (e) {
+        // Quota exceeded — try saving without base64 media urls
+        try {
+          const stripped = {
+            ...next,
+            settings: { ...next.settings, logoUrl: "" },
+            cms: { ...next.cms, media: next.cms.media.map(m => m.url?.startsWith("data:") ? {...m, url:""} : m) },
+          };
+          localStorage.setItem(STATE_KEY, JSON.stringify(stripped));
+        } catch { console.warn("[localStorage] quota exceeded even after stripping media"); }
+      }
+      // 4. Debounce Supabase config save (subjects/classes/timetable/exams/settings + cms)
       if (configSaveTimer.current) clearTimeout(configSaveTimer.current);
       configSaveTimer.current = setTimeout(() => {
         sb.saveConfig({
@@ -6066,6 +7281,12 @@ export default function SchoolERP() {
           examRecords: next.examRecords,
           settings:  { ...next.settings, logoUrl: next.settings.logoUrl?.startsWith("data:") ? "" : (next.settings.logoUrl || "") },
         });
+        // Save CMS separately — strip base64 media (too large for jsonb), keep URL-only items
+        const cmsForDb = {
+          ...next.cms,
+          media: next.cms.media.map(m => m.url?.startsWith("data:") ? { ...m, url: "" } : m),
+        };
+        sb.saveCms(cmsForDb);
       }, 800);
       return next;
     });
@@ -6101,11 +7322,12 @@ export default function SchoolERP() {
       sb.select<any>("behavior"),
       sb.select<any>("counseling_profiles"),
       sb.loadConfig(),
-    ]).then(([students, teachers, items, labs, fees, behavior, counseling, config]) => {
+      sb.loadCms(),
+    ]).then(([students, teachers, items, labs, fees, behavior, counseling, config, cmsDb]) => {
       update(prev => ({
         ...prev,
         subjects:    config?.subjects  ?? prev.subjects,
-        classes:     config?.classes   ?? prev.classes,
+        classes:     config?.classes   ? sortClasses(config.classes) : sortClasses(prev.classes),
         timetable:   config?.timetable ?? prev.timetable,
         exams:       config?.exams       ?? prev.exams,
         examRecords: config?.examRecords ?? prev.examRecords,
@@ -6118,7 +7340,28 @@ export default function SchoolERP() {
           pwCounselor:  prev.settings.pwCounselor,
           pwStaff:      prev.settings.pwStaff,
         } : prev.settings,
-        students:  students.length  ? students.map(dbToStudent)  : prev.students,
+        // CMS: merge Supabase cms with localStorage cms
+        // For media: Supabase has url="" for base64 items — restore url from localStorage version
+        cms: cmsDb ? (() => {
+          const localMedia = prev.cms.media;
+          const mergedMedia = (cmsDb.media || []).map((m: any) => {
+            if (!m.url) {
+              // This item had base64 url stripped — try to find it in localStorage version
+              const local = localMedia.find((lm: any) => lm.id === m.id);
+              return local ? { ...m, url: local.url } : m;
+            }
+            return m;
+          });
+          // Also keep any local-only media not yet in Supabase
+          const dbIds = new Set((cmsDb.media || []).map((m: any) => m.id));
+          const localOnly = localMedia.filter((m: any) => !dbIds.has(m.id));
+          return {
+            ...prev.cms,
+            ...cmsDb,
+            media: [...mergedMedia, ...localOnly],
+          };
+        })() : prev.cms,
+        students:  students.length  ? sortStudents(students.map(dbToStudent), config?.classes ?? prev.classes) : sortStudents(prev.students, config?.classes ?? prev.classes),
         teachers:  teachers.length  ? teachers.map(dbToTeacher)  : prev.teachers,
         inventory: {
           labs:  labs.length  ? labs.map(dbToLab)   : prev.inventory.labs,
@@ -6186,7 +7429,7 @@ export default function SchoolERP() {
 
     // Students
     async addStudent(s) {
-      update(st => ({ ...st, students: [...st.students, s] }));
+      update(st => ({ ...st, students: sortStudents([...st.students, s], st.classes) }));
       try { await sb.upsert("students", {
         id: s.id, name: s.name, roll_no: s.rollNo, class_id: s.classId,
         photo: s.photo, marks: s.marks, password: s.password, profile: s.profile ?? null,
@@ -6367,20 +7610,3 @@ export default function SchoolERP() {
 }
 
 // ─── Shared UI ────────────────────────────────────────────────────────────────
-function Modal({title,children,onClose,wide}:{title:string;children:React.ReactNode;onClose:()=>void;wide?:boolean}) {
-  return(
-    <div className={`bg-[#080D18] border border-white/10 rounded-2xl p-6 ${wide?"w-full max-w-2xl":"w-96"} space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto`}>
-      <div className="flex items-center justify-between"><h3 className="font-bold text-white">{title}</h3><button onClick={onClose} className="text-white/30 hover:text-white/60 transition-colors"><X size={16}/></button></div>
-      {children}
-    </div>
-  );
-}
-function Field({label,onChange,type="text"}:{label:string;onChange:(v:string)=>void;type?:string}){
-  return<div><label className="text-xs text-white/40 uppercase tracking-wider block mb-1.5">{label}</label><input type={type} onChange={e=>onChange(e.target.value)} className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50"/></div>;
-}
-function SelField({label,options,onChange}:{label:string;options:{value:string;label:string}[];onChange:(v:string)=>void}){
-  return<div><label className="text-xs text-white/40 uppercase tracking-wider block mb-1.5">{label}</label><select onChange={e=>onChange(e.target.value)} className="w-full bg-[#05080F] border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50"><option value="">— Select —</option>{options.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}</select></div>;
-}
-function MBtn({onClick,children}:{onClick:()=>void;children:React.ReactNode}){
-  return<button onClick={onClick} className="w-full bg-blue-600 hover:bg-blue-500 text-white text-sm py-2.5 rounded-xl transition-colors font-medium mt-1">{children}</button>;
-}
