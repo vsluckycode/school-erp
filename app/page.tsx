@@ -5421,19 +5421,6 @@ function SettingsTab({state,upd,isSA,setPopup}:{state:AppState;upd:(fn:(s:AppSta
           <div><label className="text-xs text-white/40 uppercase tracking-wider block mb-2">Tagline</label><input value={state.settings.tagline} onChange={e=>upd(s=>({...s,settings:{...s.settings,tagline:e.target.value}}))} className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-3 outline-none focus:border-blue-500/50"/></div>
           <div><label className="text-xs text-white/40 uppercase tracking-wider block mb-1">Browser Tab Title</label><p className="text-white/25 text-[10px] mb-2">What appears on the browser tab — updates instantly</p><input value={state.settings.siteTitle||""} onChange={e=>upd(s=>({...s,settings:{...s.settings,siteTitle:e.target.value}}))} placeholder="e.g. Bakamuna Mahasen National School" className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-3 outline-none focus:border-blue-500/50 placeholder-white/20"/></div>
           <div><label className="text-xs text-white/40 uppercase tracking-wider block mb-2">Blog URL</label><input value={state.settings.blogUrl} onChange={e=>upd(s=>({...s,settings:{...s.settings,blogUrl:e.target.value}}))} placeholder="https://..." className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-3 outline-none focus:border-blue-500/50 placeholder-white/20"/></div>
-          <div>
-            <label className="text-xs text-white/40 uppercase tracking-wider block mb-2">School Logo</label>
-            <div className="flex items-center gap-4">
-              <div className="w-16 h-16 rounded-xl border border-white/10 bg-white/5 flex items-center justify-center flex-shrink-0 overflow-hidden">
-                {state.settings.logoUrl?<img src={state.settings.logoUrl} className="w-full h-full object-cover"/>:<School size={22} className="text-white/20"/>}
-              </div>
-              <div className="flex-1 space-y-2">
-                <label className="flex items-center gap-2 cursor-pointer bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-400 text-xs px-3 py-2 rounded-lg transition-colors w-fit"><Upload size={12}/>Upload Image<input type="file" accept="image/*" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(!f)return;const r=new FileReader();r.onload=ev=>{const img=new (window.Image as any)();img.onload=()=>{const cv=document.createElement("canvas");const sc=Math.min(1,200/img.width);cv.width=Math.round(img.width*sc);cv.height=Math.round(img.height*sc);cv.getContext("2d")?.drawImage(img,0,0,cv.width,cv.height);const logoUrl=cv.toDataURL("image/png",0.9);try{localStorage.setItem("school_logo",logoUrl);}catch{}upd(s=>({...s,settings:{...s.settings,logoUrl}}));};img.src=ev.target?.result as string;};r.readAsDataURL(f);}}/></label>
-                <input value={state.settings.logoUrl?.startsWith("data:")?"":(state.settings.logoUrl||"")} onChange={e=>{const logoUrl=e.target.value;try{if(logoUrl)localStorage.setItem("school_logo",logoUrl);else localStorage.removeItem("school_logo");}catch{}upd(s=>({...s,settings:{...s.settings,logoUrl}}));}} placeholder="...or paste image URL" className="w-full bg-white/5 border border-white/10 text-white text-xs rounded-lg px-3 py-2 outline-none focus:border-blue-500/50 placeholder-white/20"/>
-              </div>
-            </div>
-            {state.settings.logoUrl&&<button onClick={()=>{try{localStorage.removeItem("school_logo");}catch{}upd(s=>({...s,settings:{...s.settings,logoUrl:""}}))} } className="mt-2 text-xs text-red-400/60 hover:text-red-400 transition-colors">Remove logo</button>}
-          </div>
           {!isSA&&(
             <div>
               <label className="text-xs text-white/40 uppercase tracking-wider block mb-3">Support Admins</label>
@@ -5891,6 +5878,7 @@ function CMSAdmin({state,setState}:{state:AppState;setState:(fn:(s:AppState)=>Ap
   const close=()=>setPopup(null);
 
   const SECTIONS=[
+    {id:"logo",       label:"School Logo",   icon:School},
     {id:"slides",    label:"Home Slides",   icon:PlayCircle},
     {id:"gallery",   label:"Gallery",       icon:Image},
     {id:"news",      label:"News & Blog",   icon:Newspaper},
@@ -5935,6 +5923,30 @@ function CMSAdmin({state,setState}:{state:AppState;setState:(fn:(s:AppState)=>Ap
 
   function renderSection(){
     switch(section){
+      case "logo": return(
+        <div className="space-y-6">
+          <h3 className="text-white font-bold text-lg">School Logo</h3>
+          <div className="bg-white/3 border border-white/10 rounded-2xl p-6 space-y-5">
+            <div className="flex items-center gap-5">
+              <div className="w-28 h-28 rounded-2xl border-2 border-[#C9A84C]/40 bg-white flex items-center justify-center overflow-hidden flex-shrink-0 shadow-xl p-2">
+                {state.settings.logoUrl?<img src={state.settings.logoUrl} className="w-full h-full object-contain"/>:<img src="/school-logo.png" className="w-full h-full object-contain"/>}
+              </div>
+              <div>
+                <div className="text-white font-semibold mb-1">Current Logo</div>
+                <div className="text-white/40 text-xs mb-3">Appears in the website header on all devices.</div>
+                {state.settings.logoUrl&&<button onClick={()=>{try{localStorage.removeItem("school_logo");}catch{}setState(s=>({...s,settings:{...s.settings,logoUrl:""}}));}} className="text-xs text-red-400/60 hover:text-red-400 transition-colors">Remove logo</button>}
+              </div>
+            </div>
+            <label className="flex items-center gap-3 cursor-pointer bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-400 text-sm px-4 py-3 rounded-xl transition-colors w-fit">
+              <Upload size={16}/>Upload Logo
+              <input type="file" accept="image/*" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(!f)return;const r=new FileReader();r.onload=ev=>{const img=new (window.Image as any)();img.onload=()=>{const cv=document.createElement("canvas");const sc=Math.min(1,400/Math.max(img.width,img.height));cv.width=Math.round(img.width*sc);cv.height=Math.round(img.height*sc);cv.getContext("2d")?.drawImage(img,0,0,cv.width,cv.height);const logoUrl=cv.toDataURL("image/png",0.95);try{localStorage.setItem("school_logo",logoUrl);}catch{}setState(s=>({...s,settings:{...s.settings,logoUrl}}));};img.src=ev.target?.result as string;};r.readAsDataURL(f);}}/>
+            </label>
+            <div className="text-white/20 text-xs text-center">— or —</div>
+            <input value={state.settings.logoUrl?.startsWith("data:")?"":( state.settings.logoUrl||"")} onChange={e=>{const logoUrl=e.target.value;try{if(logoUrl)localStorage.setItem("school_logo",logoUrl);else localStorage.removeItem("school_logo");}catch{}setState(s=>({...s,settings:{...s.settings,logoUrl}}));}} placeholder="Paste image URL here..." className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-3 outline-none focus:border-blue-500/50 placeholder-white/20"/>
+            <p className="text-white/25 text-xs">Recommended: Square PNG with transparent background, min 200×200px.</p>
+          </div>
+        </div>
+      );
       case "slides": return(
         <div className="space-y-4">
           <div className="flex items-center justify-between"><h3 className="text-white font-bold text-lg">Home Slider</h3><button onClick={()=>setPopup({type:"addSlide"})} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-xs px-3 py-2 rounded-lg transition-colors"><Plus size={12}/>Add Slide</button></div>
@@ -6462,7 +6474,7 @@ function PublicWebsite({state,route,setRoute,onEnterDash}:{state:AppState;route:
       <header className="sticky top-0 z-50 bg-[#0f1729]/95 backdrop-blur-md border-b border-white/10 shadow-xl shadow-black/20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
           <button onClick={()=>nav("home")} className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg overflow-hidden flex-shrink-0 bg-[#C9A84C]/20 border border-[#C9A84C]/30 flex items-center justify-center">{state.settings.logoUrl?<img src={state.settings.logoUrl} className="w-full h-full object-contain" width={36} height={36} alt="School Logo" style={{display:"block"}}/>:<School size={17} className="text-[#C9A84C]"/>}</div>
+            <div className="w-9 h-9 rounded-lg overflow-hidden flex-shrink-0 bg-[#C9A84C]/20 border border-[#C9A84C]/30 flex items-center justify-center">{(siteMounted&&state.settings.logoUrl)?<img src={state.settings.logoUrl} className="w-full h-full object-contain" width={36} height={36} alt="School Logo" style={{display:"block"}}/>:<img src="/school-logo.png" className="w-full h-full object-contain" width={36} height={36} alt="School Logo" style={{display:"block"}}/>}</div>
             <div><div className="text-white font-bold text-sm leading-tight" style={{fontFamily:"'Playfair Display',serif"}} suppressHydrationWarning>{state.settings.name}</div><div className="text-white/40 text-[10px] hidden sm:block" suppressHydrationWarning>{state.settings.tagline}</div></div>
           </button>
           {/* Desktop nav */}
@@ -6506,7 +6518,7 @@ function PublicWebsite({state,route,setRoute,onEnterDash}:{state:AppState;route:
       {/* Footer */}
       <footer className="bg-[#0f1729] text-white/50 py-12 mt-16">
         <div className="max-w-7xl mx-auto px-6 grid grid-cols-1 md:grid-cols-3 gap-8">
-          <div><div className="flex items-center gap-3 mb-3"><div className="w-8 h-8 rounded-lg bg-[#C9A84C]/20 flex items-center justify-center overflow-hidden">{state.settings.logoUrl?<img src={state.settings.logoUrl} className="w-full h-full object-cover" alt="School Logo"/>:<School size={15} className="text-[#C9A84C]"/>}</div><span className="text-white font-bold" style={{fontFamily:"'Playfair Display',serif"}} suppressHydrationWarning>{state.settings.name}</span></div><p className="text-sm" suppressHydrationWarning>{state.settings.tagline}</p></div>
+          <div><div className="flex items-center gap-3 mb-3"><div className="w-8 h-8 rounded-lg bg-[#C9A84C]/20 flex items-center justify-center overflow-hidden">{(siteMounted&&state.settings.logoUrl)?<img src={state.settings.logoUrl} className="w-full h-full object-cover" alt="School Logo"/>:<img src="/school-logo.png" className="w-full h-full object-contain" alt="School Logo"/>}</div><span className="text-white font-bold" style={{fontFamily:"'Playfair Display',serif"}} suppressHydrationWarning>{state.settings.name}</span></div><p className="text-sm" suppressHydrationWarning>{state.settings.tagline}</p></div>
           <div><h4 className="text-white font-semibold mb-3 text-sm">{T.quickLinks}</h4><div className="space-y-1.5">{PAGES.map(p=><button key={p.id} onClick={()=>nav(p.id)} className="block text-sm hover:text-[#C9A84C] transition-colors text-left">{p.label}</button>)}</div></div>
           <div><h4 className="text-white font-semibold mb-3 text-sm">{T.contact}</h4><p className="text-sm">{cms.visionMission.contact}</p><p className="text-sm mt-1">{cms.visionMission.address}</p><button onClick={onEnterDash} className="mt-3 pub-btn text-xs px-3 py-2 rounded-lg inline-flex items-center gap-1.5"><Lock size={11}/>{T.staffPortal}</button></div>
         </div>
@@ -6565,7 +6577,7 @@ function PageHome({cms,onNav,settings,T}:{cms:CMS;onNav:(r:string)=>void;setting
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
             {[{v:cms.quickStats.students,l:"Students",suf:"+"},{v:cms.quickStats.teachers,l:"Teachers",suf:"+"},{v:cms.quickStats.founded,l:"Est.",suf:""},{v:cms.quickStats.achievements,l:"Awards",suf:"+"}].map((s,i)=>(
               <div key={i} className="text-center">
-                <div className="text-3xl md:text-4xl font-bold text-[#C9A84C]" style={{fontFamily:"'Playfair Display',serif"}}>{s.v}{s.suf}</div>
+                <div className="text-3xl md:text-4xl font-bold text-[#C9A84C]" style={{fontFamily:"'Playfair Display',serif"}} suppressHydrationWarning>{s.v}{s.suf}</div>
                 <div className="text-white/50 text-sm mt-1">{s.l}</div>
               </div>
             ))}
@@ -7295,26 +7307,19 @@ export default function SchoolERP() {
 
   // ─── Sync browser tab title + favicon ────────────────────────────────────────
   useEffect(() => {
-    // Set favicon from public folder — permanent, works on all devices
     try {
       let link = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
       if (!link) { link = document.createElement("link"); link.rel = "icon"; document.head.appendChild(link); }
-      link.href = "/school-logo.png";
-      link.type = "image/png";
+      link.href = "/school-logo.png"; link.type = "image/png";
     } catch {}
-    // On mount: try localStorage backup first
     try {
       const bak = localStorage.getItem("erp_settings_bak");
-      if (bak) {
-        const t = JSON.parse(bak)?.siteTitle?.trim();
-        if (t) { document.title = t; return; }
-      }
+      if (bak) { const t = JSON.parse(bak)?.siteTitle?.trim(); if (t) { document.title = t; return; } }
     } catch {}
     const t = state.settings.siteTitle?.trim();
     if (t) document.title = t;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
   useEffect(() => {
     const t = state.settings.siteTitle?.trim();
     if (t) document.title = t;
@@ -7399,13 +7404,6 @@ export default function SchoolERP() {
         behavior:  { records: behavior.length ? behavior.map(dbToBehavior)               : prev.behavior.records },
         counseling:{ profiles: counseling.length ? counseling.map(dbToCounselingProfile) : prev.counseling.profiles },
       }));
-      try {
-        if (config?.settings) {
-          const bak = localStorage.getItem("erp_settings_bak");
-          const prev = bak ? JSON.parse(bak) : {};
-          localStorage.setItem("erp_settings_bak", JSON.stringify({ ...prev, ...config.settings, logoUrl: "" }));
-        }
-      } catch {}
       setDbStatus("ok");
     }).catch(() => setDbStatus("offline"));
   }, []);
