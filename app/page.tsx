@@ -590,6 +590,119 @@ function gradeBg(g:Grade){
 function gradeLabel(g:Grade){ return{A:"Excellent",B:"Good",C:"Average",S:"Simple Pass",W:"Fail","-":"–"}[g]; }
 function calcGPA(avg:number):number{ if(avg>=75)return 4.0; if(avg>=65)return 3.0; if(avg>=55)return 2.0; if(avg>=35)return 1.0; return 0.0; }
 function gpaColor(gpa:number):string{ if(gpa>=4.0)return "text-blue-400"; if(gpa>=3.0)return "text-yellow-400"; if(gpa>=2.0)return "text-orange-400"; if(gpa>=1.0)return "text-emerald-400"; return "text-red-400"; }
+// ─── Professional Teacher Avatar SVG Generator ───────────────────────────────
+// Returns a data URL for an inline SVG avatar based on teacher name/gender/role
+function teacherAvatar(name:string, gender?:string, role?:string):string {
+  const seed = name||"teacher";
+  const initial = (seed[0]||"T").toUpperCase();
+  // Deterministic colour from name
+  const colours = [
+    ["#1e3a5f","#3b82f6"],["#1a3a2a","#22c55e"],["#3a1e3a","#a855f7"],
+    ["#3a2e1a","#f59e0b"],["#2a1a1a","#ef4444"],["#1a2a3a","#06b6d4"],
+    ["#2a2a1a","#84cc16"],["#3a1a2e","#ec4899"],
+  ];
+  let hash=0; for(const ch of seed) hash=(hash*31+ch.charCodeAt(0))&0xffff;
+  const [bg,ac]=colours[hash%colours.length];
+
+  // Buddhist monk — saffron robe, shaved head
+  const isMonk = role==="monk" ||
+    seed.toLowerCase().includes("monk") ||
+    seed.toLowerCase().includes("bhikkhu") ||
+    seed.toLowerCase().includes("thero") ||
+    seed.toLowerCase().includes("හාමුදු") ||
+    seed.toLowerCase().includes("rev.");
+
+  // Female vs male face details
+  const isFemale = gender==="F" || gender==="Female" ||
+    /^(mrs?s?|ms|miss)/i.test(seed);
+
+  let svg:string;
+
+  if(isMonk){
+    // Saffron monk avatar
+    svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80">
+      <rect width="80" height="80" rx="40" fill="#7c4f00"/>
+      <!-- body robe saffron -->
+      <ellipse cx="40" cy="72" rx="26" ry="18" fill="#e07b00"/>
+      <rect x="14" y="56" width="52" height="20" rx="6" fill="#e07b00"/>
+      <!-- robe fold -->
+      <path d="M40 56 Q28 60 22 72 L58 72 Q52 60 40 56Z" fill="#cc6f00"/>
+      <!-- neck -->
+      <rect x="34" y="46" width="12" height="12" rx="4" fill="#d4956a"/>
+      <!-- head (shaved) -->
+      <ellipse cx="40" cy="34" rx="17" ry="18" fill="#d4956a"/>
+      <!-- slight stubble shading on top -->
+      <ellipse cx="40" cy="26" rx="14" ry="10" fill="#c4835a" opacity="0.35"/>
+      <!-- eyes -->
+      <ellipse cx="34" cy="34" rx="2.2" ry="2.5" fill="#3a1a00"/>
+      <ellipse cx="46" cy="34" rx="2.2" ry="2.5" fill="#3a1a00"/>
+      <!-- calm smile -->
+      <path d="M34 42 Q40 46 46 42" stroke="#a0522d" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+      <!-- ear -->
+      <ellipse cx="23" cy="34" rx="3" ry="4" fill="#c4835a"/>
+      <ellipse cx="57" cy="34" rx="3" ry="4" fill="#c4835a"/>
+    </svg>`;
+  } else if(isFemale){
+    svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80">
+      <rect width="80" height="80" rx="40" fill="${bg}"/>
+      <!-- shoulders / blazer -->
+      <ellipse cx="40" cy="76" rx="28" ry="16" fill="${ac}22"/>
+      <path d="M12 76 Q18 58 40 54 Q62 58 68 76Z" fill="${ac}55"/>
+      <!-- collar -->
+      <path d="M35 54 L40 62 L45 54" fill="white" opacity="0.7"/>
+      <!-- neck -->
+      <rect x="35" y="46" width="10" height="10" rx="3" fill="#f5c5a0"/>
+      <!-- head -->
+      <ellipse cx="40" cy="32" rx="16" ry="18" fill="#f5c5a0"/>
+      <!-- hair — long, professional bun suggestion -->
+      <ellipse cx="40" cy="17" rx="16" ry="9" fill="${ac}"/>
+      <ellipse cx="40" cy="14" rx="8" ry="5" fill="${ac}"/>
+      <!-- side hair -->
+      <ellipse cx="25" cy="30" rx="4" ry="10" fill="${ac}"/>
+      <ellipse cx="55" cy="30" rx="4" ry="10" fill="${ac}"/>
+      <!-- eyes -->
+      <ellipse cx="34.5" cy="31" rx="2" ry="2.5" fill="#3a2a1a"/>
+      <ellipse cx="45.5" cy="31" rx="2" ry="2.5" fill="#3a2a1a"/>
+      <!-- eyelashes -->
+      <path d="M32.5 28.5 Q34.5 27 36.5 28.5" stroke="#3a2a1a" stroke-width="1" fill="none"/>
+      <path d="M43.5 28.5 Q45.5 27 47.5 28.5" stroke="#3a2a1a" stroke-width="1" fill="none"/>
+      <!-- smile -->
+      <path d="M35 38 Q40 43 45 38" stroke="#c47a5a" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+      <!-- ear -->
+      <ellipse cx="24" cy="32" rx="2.5" ry="3.5" fill="#f0b090"/>
+      <ellipse cx="56" cy="32" rx="2.5" ry="3.5" fill="#f0b090"/>
+    </svg>`;
+  } else {
+    svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80">
+      <rect width="80" height="80" rx="40" fill="${bg}"/>
+      <!-- shoulders / suit jacket -->
+      <path d="M12 80 Q16 58 40 54 Q64 58 68 80Z" fill="#1e293b"/>
+      <!-- shirt & tie -->
+      <path d="M36 54 L40 68 L44 54" fill="white" opacity="0.85"/>
+      <path d="M40 58 L38 64 L40 70 L42 64Z" fill="${ac}" opacity="0.9"/>
+      <!-- neck -->
+      <rect x="35" y="46" width="10" height="10" rx="3" fill="#e8b090"/>
+      <!-- head -->
+      <ellipse cx="40" cy="31" rx="16" ry="18" fill="#e8b090"/>
+      <!-- professional hair — short, side parted -->
+      <ellipse cx="40" cy="16" rx="16" ry="9" fill="${ac}cc"/>
+      <path d="M24 20 Q40 12 56 20 L56 16 Q40 8 24 16Z" fill="${ac}"/>
+      <!-- ear -->
+      <ellipse cx="24" cy="31" rx="2.5" ry="3.5" fill="#d8a080"/>
+      <ellipse cx="56" cy="31" rx="2.5" ry="3.5" fill="#d8a080"/>
+      <!-- eyes -->
+      <ellipse cx="34.5" cy="30" rx="2.2" ry="2.5" fill="#2a1a0a"/>
+      <ellipse cx="45.5" cy="30" rx="2.2" ry="2.5" fill="#2a1a0a"/>
+      <!-- eyebrows -->
+      <path d="M32 26.5 Q34.5 25 37 26.5" stroke="#6b4226" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+      <path d="M43 26.5 Q45.5 25 48 26.5" stroke="#6b4226" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+      <!-- smile -->
+      <path d="M35 38 Q40 43 45 38" stroke="#b07050" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+    </svg>`;
+  }
+  return "data:image/svg+xml;charset=utf-8,"+encodeURIComponent(svg);
+}
+
 
 // ─── Grade Key Component — PHASE 5 updated thresholds ────────────────────────
 function GradeKey() {
@@ -1538,7 +1651,7 @@ function Layout({user,state,children,navItems,activeTab,setTab,onLogout,onBackTo
 
 // ─── TeacherPickerModal ──────────────────────────────────────────────────────
 function TeacherPickerModal({teachers,selected,onConfirm,onClose,allSubjects}:{
-  teachers:{id:string;name:string;email:string;photo?:string;status?:string}[];
+  teachers:{id:string;name:string;email:string;photo?:string;status?:string;profile?:TeacherProfile;is_counselor?:boolean}[];
   selected:string[];onConfirm:(ids:string[])=>void;onClose:()=>void;
   allSubjects?:{id:string;code:string;teacherIds:string[];name:string}[];
 }){
@@ -1578,8 +1691,7 @@ function TeacherPickerModal({teachers,selected,onConfirm,onClose,allSubjects}:{
             return(
               <button key={t.id} type="button" onClick={()=>toggle(t.id)}
                 className={`w-full flex items-center gap-3 p-3 rounded-xl border transition-all text-left group ${isSel?"border-blue-500/50 bg-blue-500/8":"border-white/6 hover:bg-white/4 hover:border-white/12"}`}>
-                {t.photo?<img src={t.photo} className="w-10 h-10 rounded-full object-cover border border-white/10 flex-shrink-0"/>
-                  :<div className={`w-10 h-10 rounded-full border flex items-center justify-center text-sm font-bold flex-shrink-0 transition-colors ${isSel?"bg-blue-500/20 border-blue-500/30 text-blue-300":"bg-white/5 border-white/10 text-white/60"}`}>{t.name[0]}</div>}
+                {<img src={t.photo||teacherAvatar(t.name,t.profile?.gender,t.is_counselor?"counselor":undefined)} className="w-10 h-10 rounded-full object-cover border border-white/10 flex-shrink-0"/>}
                 <div className="flex-1 min-w-0">
                   <div className={`text-sm font-semibold truncate transition-colors ${isSel?"text-white":"text-white/75 group-hover:text-white/90"}`}>{t.name}</div>
                   <div className="text-xs text-white/25 truncate">{t.email}</div>
@@ -1633,7 +1745,7 @@ function AddSubjectForm({state,upd,sb,close}:{state:AppState;upd:(fn:(s:AppState
                 ?<><User size={14} className="text-white/25 group-hover:text-blue-400 transition-colors"/><span className="text-white/30 group-hover:text-white/60 transition-colors text-sm">Click to select teachers…</span></>
                 :selTeachers.slice(0,3).map(t=>(
                   <div key={t.id} className="flex items-center gap-1.5 bg-blue-500/10 border border-blue-500/20 rounded-lg px-2.5 py-1">
-                    {t.photo?<img src={t.photo} className="w-4 h-4 rounded-full object-cover"/>:<div className="w-4 h-4 rounded-full bg-blue-500/30 flex items-center justify-center text-[8px] text-white font-bold">{t.name[0]}</div>}
+                    {<img src={t.photo||teacherAvatar(t.name,t.profile?.gender,t.is_counselor?"counselor":undefined)} className="w-4 h-4 rounded-full object-cover"/>}
                     <span className="text-xs text-blue-300 font-medium">{t.name.split(" ")[0]}</span>
                   </div>
                 ))
@@ -1679,7 +1791,7 @@ function EditSubjectForm({state,upd,sb,close,sub}:{state:AppState;upd:(fn:(s:App
                 ?<><User size={14} className="text-white/25 group-hover:text-blue-400 transition-colors"/><span className="text-white/30 group-hover:text-white/60 transition-colors text-sm">No teachers assigned…</span></>
                 :selTeachers.slice(0,3).map(t=>(
                   <div key={t.id} className="flex items-center gap-1.5 bg-blue-500/10 border border-blue-500/20 rounded-lg px-2.5 py-1">
-                    {t.photo?<img src={t.photo} className="w-4 h-4 rounded-full object-cover"/>:<div className="w-4 h-4 rounded-full bg-blue-500/30 flex items-center justify-center text-[8px] text-white font-bold">{t.name[0]}</div>}
+                    {<img src={t.photo||teacherAvatar(t.name,t.profile?.gender,t.is_counselor?"counselor":undefined)} className="w-4 h-4 rounded-full object-cover"/>}
                     <span className="text-xs text-blue-300 font-medium">{t.name.split(" ")[0]}</span>
                   </div>
                 ))
@@ -2429,7 +2541,7 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
                         ? <div className="flex flex-col gap-1">
                             {teachers.map(t=>(
                               <div key={t.id} className="flex items-center gap-1.5">
-                                {t.photo?<img src={t.photo} className="w-5 h-5 rounded-full object-cover border border-white/10 flex-shrink-0"/>:<div className="w-5 h-5 rounded-full bg-gradient-to-br from-blue-500/30 to-purple-500/30 border border-white/10 flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">{t.name[0]}</div>}
+                                {<img src={t.photo||teacherAvatar(t.name,t.profile?.gender,t.is_counselor?"counselor":undefined)} className="w-5 h-5 rounded-full object-cover border border-white/10 flex-shrink-0"/>}
                                 <span className="text-xs text-white/70">{t.name}</span>
                               </div>
                             ))}
@@ -2474,7 +2586,7 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
               return(
                 <div key={t.id} className="bg-[#080D18] border border-white/5 rounded-xl p-5 hover:border-blue-500/20 transition-all">
                   <div className="flex items-center gap-3 mb-4">
-                    {t.photo?<img src={t.photo} className="w-10 h-10 rounded-full object-cover border border-white/10 flex-shrink-0"/>:<div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500/30 to-purple-500/30 border border-white/10 flex items-center justify-center text-white font-bold flex-shrink-0">{t.name[0]}</div>}
+                    {<img src={t.photo||teacherAvatar(t.name,t.profile?.gender,t.is_counselor?"counselor":undefined)} className="w-10 h-10 rounded-full object-cover border border-white/10 flex-shrink-0"/>}
                     <div className="flex-1 min-w-0">
                       <div className="text-white font-semibold">{t.name}</div>
                       <div className="text-xs text-white/40">{t.email}</div>
@@ -3317,10 +3429,7 @@ function TeacherView({user,state,setState,onLogout,onBackToSite,db}:
           <div className="bg-[#080D18] border border-white/5 rounded-2xl p-6">
             <div className="flex items-center gap-5">
               <div className="relative">
-                {teacher.photo
-                  ?<img src={teacher.photo} className="w-16 h-16 rounded-2xl object-cover border border-white/10"/>
-                  :<div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-purple-500/30 to-blue-500/30 border border-white/10 flex items-center justify-center text-2xl font-bold text-white">{teacher.name[0]}</div>
-                }
+                {<img src={teacher.photo||teacherAvatar(teacher.name,teacher.profile?.gender,teacher.is_counselor?"counselor":undefined)} className="w-16 h-16 rounded-2xl object-cover border border-white/10"/>}
               </div>
               <div className="flex-1">
                 <h2 className="text-xl font-bold text-white">{teacher.name}</h2>
