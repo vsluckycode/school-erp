@@ -1,5 +1,7 @@
 "use client";
 import React, { useState, useEffect, useCallback } from "react";
+import MarksEntry from "./components/MarksEntry";
+import ResultLedger from "./components/ResultLedger";
 import {
   School, Users, BookOpen, QrCode, Settings, BarChart3,
   Plus, X, Check, Trash2, GraduationCap, Clock, Award,
@@ -288,7 +290,7 @@ interface LoggedInUser { role:Role; id:string; name:string }
 // ─── PII Encryption (XOR + btoa — replace with Web Crypto AES in production) ──
 const ENC_KEY = "NEXUS_ERP_2026";
 function encPII(v:string):string { if(!v) return ""; try { return btoa(unescape(encodeURIComponent(v.split("").map((c,i)=>String.fromCharCode(c.charCodeAt(0)^ENC_KEY.charCodeAt(i%ENC_KEY.length))).join("")))); } catch { return btoa(v); } }
-function decPII(v:string):string { if(!v) return ""; try { return decodeURIComponent(escape(atob(v))).split("").map((c,i)=>String.fromCharCode(c.charCodeAt(0)^ENC_KEY.charCodeAt(i%ENC_KEY.length))).join(""); } catch { return atob(v); } }
+function decPII(v:string):string { if(!v) return ""; try { return decodeURIComponent(escape(atob(v))).split("").map((c,i)=>String.fromCharCode(c.charCodeAt(0)^ENC_KEY.charCodeAt(i%ENC_KEY.length))).join(""); } catch { try { return atob(v); } catch { return v; } } }
 function encProfile<T extends Record<string,any>>(p:T):T { const o:any={}; Object.entries(p).forEach(([k,v])=>{o[k]=v?encPII(String(v)):v;}); return o as T; }
 function decProfile<T extends Record<string,any>>(p?:T|string):T { if(!p) return {} as T; const obj:any=typeof p==="string"?(() => { try { return JSON.parse(p); } catch { return {}; } })():p; const o:any={}; Object.entries(obj).forEach(([k,v])=>{o[k]=v?decPII(String(v)):v;}); return o as T; }
 
@@ -930,7 +932,7 @@ function StudentIDCard({student,cls,schoolName,schoolTagline,logoUrl,onClose}:{s
             </div>
             {/* ── Body ── */}
             <div style={{display:"flex",gap:14,padding:"12px 18px 8px",flex:1,minHeight:0}}>
-              <img src={student.photo} alt="" style={{width:100,height:128,borderRadius:8,border:"2px solid #bfdbfe",objectFit:"cover",flexShrink:0}}/>
+              <img src={student.photo||undefined} alt="" style={{width:100,height:128,borderRadius:8,border:"2px solid #bfdbfe",objectFit:"cover",flexShrink:0}}/>
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontSize:18,fontWeight:900,color:"#0f172a",marginBottom:4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",letterSpacing:0.3}}>{student.name}</div>
                 <div style={{fontSize:13,color:"#1d4ed8",fontFamily:"monospace",fontWeight:700,marginBottom:8,letterSpacing:1}}>ID: {student.rollNo}</div>
@@ -1102,7 +1104,7 @@ function SubjectChart({state,classId}:{state:AppState;classId:string}) {
         {students.map(st=>(
           <div key={st.id} className="mb-3 last:mb-0">
             <div className="flex items-center gap-2 mb-1.5">
-              <img src={st.photo} className="w-5 h-5 rounded-full flex-shrink-0"/>
+              <img src={st.photo||undefined} className="w-5 h-5 rounded-full flex-shrink-0"/>
               <span className="text-xs text-white/60">{st.name}</span>
             </div>
             <div className="flex gap-1">
@@ -1201,7 +1203,7 @@ function MarksheetView({state,classId,onClassChange,availableClasses}:
             <tbody>{results.sort((a,b)=>a.rank-b.rank).map(r=>(
               <tr key={r.student.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
                 <td className="px-4 py-3"><span className={`font-mono font-bold ${r.rank===1?"text-yellow-400":r.rank===2?"text-gray-300":r.rank===3?"text-orange-400":"text-white/40"}`}>#{r.rank}</span></td>
-                <td className="px-4 py-3"><div className="flex items-center gap-2"><img src={r.student.photo} className="w-7 h-7 rounded-full"/><div><div className="text-sm text-white">{r.student.name}</div><div className="text-xs text-white/30 font-mono">{r.student.rollNo}</div></div></div></td>
+                <td className="px-4 py-3"><div className="flex items-center gap-2"><img src={r.student.photo||undefined} className="w-7 h-7 rounded-full"/><div><div className="text-sm text-white">{r.student.name}</div><div className="text-xs text-white/30 font-mono">{r.student.rollNo}</div></div></div></td>
                 {subs.map((s,i)=><td key={s.id} className="px-3 py-3 text-center"><span className={`font-mono text-sm ${r.scores[i]===null?"text-white/20":r.scores[i]!>=75?"text-emerald-400":r.scores[i]!>=40?"text-yellow-400":"text-red-400"}`}>{r.scores[i]??'–'}</span></td>)}
                 <td className="px-4 py-3 text-center font-mono text-sm text-white font-bold">{r.total}</td>
                 <td className="px-4 py-3 text-center font-mono text-sm text-white/60">{r.avg}%</td>
@@ -1771,27 +1773,101 @@ function GradeClassPickerState({classes,initSelected,onChange}:{classes:{id:stri
   return <GradeClassPicker classes={classes} selected={sel} onChange={v=>{setSel(v);onChange(v);}}/>;
 }
 
+// A/L streams with their allowed divisions
+const AL_STREAM_DIVISIONS:{[k:string]:string[]} = {
+  "Arts":     ["A","B"],
+  "Science":  ["A","B"],
+  "Math":     ["A","B"],
+  "Commerce": ["A","B"],
+  "E Tech":   [""],     // single class, no division letter
+  "B Tech":   [""],
+};
+
 function AddClassModal({state,sb,upd,close}:{state:AppState;sb:any;upd:(fn:(s:AppState)=>AppState)=>void;close:()=>void}){
-  const [n,setN]=useState("");
-  const [sec,setSec]=useState("");
+  const [n,setN]=useState("");           // grade number e.g. "6","7"..."13"
+  const [sec,setSec]=useState("");       // section e.g. "A","Science-A"
   const [tid,setTid]=useState("");
   const [dupErr,setDupErr]=useState("");
+  const [alStream,setAlStream]=useState("Arts");
+  const [alDiv,setAlDiv]=useState("A");
+
+  const isAL = n==="12"||n==="13";
+
+  // Build section string for A/L
+  const alSection = isAL
+    ? (AL_STREAM_DIVISIONS[alStream][0]===""
+        ? alStream                      // e.g. "E Tech"
+        : alStream+"-"+alDiv)           // e.g. "Arts-A", "Science-B"
+    : sec;
+
+  const finalSection = isAL ? alSection : sec;
+
   return(
     <Modal title="Add Class" onClose={close}>
-      <Field label="Class Name" onChange={v=>{setN(v);setDupErr("");}}/>
-      <Field label="Section" onChange={v=>{setSec(v);setDupErr("");}}/>
+      {/* Grade */}
+      <div className="mb-3">
+        <label className="text-white/50 text-xs font-semibold uppercase tracking-widest block mb-1">Grade</label>
+        <div className="flex gap-1 flex-wrap">
+          {["6","7","8","9","10","11","12","13"].map(g=>(
+            <button key={g} onClick={()=>{setN(g);setSec("A");setDupErr("");}}
+              className={`px-3 py-1 rounded text-xs font-bold transition-all ${
+                n===g
+                  ? (g==="12"||g==="13")?"bg-purple-600 text-white":(g==="10"||g==="11")?"bg-cyan-600 text-white":"bg-blue-600 text-white"
+                  : "bg-white/5 text-white/40 hover:text-white/70"
+              }`}>
+              {g==="10"||g==="11"?"O/L "+g:g==="12"||g==="13"?"A/L "+g:"Gr "+g}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Section — different UI for A/L */}
+      {isAL ? (
+        <div className="mb-3">
+          <label className="text-white/50 text-xs font-semibold uppercase tracking-widest block mb-1">Stream & Division</label>
+          <div className="flex flex-col gap-2">
+            <div className="flex gap-1 flex-wrap">
+              {Object.keys(AL_STREAM_DIVISIONS).map(s=>(
+                <button key={s} onClick={()=>{setAlStream(s);setAlDiv(AL_STREAM_DIVISIONS[s][0]||"");setDupErr("");}}
+                  className={`px-3 py-1 rounded text-xs font-bold transition-all ${
+                    alStream===s?"bg-purple-600 text-white":"bg-white/5 text-white/40 hover:text-white/70"
+                  }`}>{s}</button>
+              ))}
+            </div>
+            {AL_STREAM_DIVISIONS[alStream][0]!=="" && (
+              <div className="flex gap-1">
+                {AL_STREAM_DIVISIONS[alStream].map(d=>(
+                  <button key={d} onClick={()=>{setAlDiv(d);setDupErr("");}}
+                    className={`px-4 py-1 rounded text-xs font-bold transition-all ${
+                      alDiv===d?"bg-indigo-500 text-white":"bg-white/5 text-white/40 hover:text-white/70"
+                    }`}>{d}</button>
+                ))}
+              </div>
+            )}
+            <div className="text-xs text-white/30 mt-1">
+              Will create: Grade {n} — <span className="text-purple-300 font-bold">{alSection}</span>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <Field label="Section (e.g. A, B, C)" onChange={v=>{setSec(v);setDupErr("");}}/>
+      )}
+
       <SelField label="Class Teacher" options={state.teachers.map(t=>({value:t.id,label:t.name}))} onChange={v=>setTid(v)}/>
       {dupErr&&<div className="text-red-400 text-xs bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">⚠️ {dupErr}</div>}
       <MBtn onClick={async()=>{
-        if(n&&sec){
-          const exists=state.classes.find(c=>c.name.trim().toLowerCase()===n.trim().toLowerCase()&&c.section.trim().toLowerCase()===sec.trim().toLowerCase());
-          if(exists){setDupErr(`Class ${n.trim()}-${sec.trim()} already exists!`);return;}
-          const id=uid();
-          upd(s=>({...s,classes:sortClasses([...s.classes,{id,name:n,section:sec,teacherId:tid}])}));
-          try{await sb.upsert("classes",{id,name:n,section:sec,teacher_id:tid||null});}catch(e){console.warn("[sb.classes]",e);}
-          close();
-        }
-      }}>Create</MBtn>
+        if(!n){ setDupErr("Select a grade."); return; }
+        if(!finalSection){ setDupErr("Enter a section."); return; }
+        const exists=state.classes.find(c=>
+          c.name.trim()===n.trim() &&
+          c.section.trim().toLowerCase()===finalSection.trim().toLowerCase()
+        );
+        if(exists){setDupErr(`Grade ${n} ${finalSection} already exists!`);return;}
+        const id=uid();
+        upd(s=>({...s,classes:sortClasses([...s.classes,{id,name:n,section:finalSection,teacherId:tid}])}));
+        try{await sb.upsert("classes",{id,name:n,section:finalSection,teacher_id:tid||undefined});}catch(e){console.warn("[sb.classes]",e);}
+        close();
+      }}>Create Class</MBtn>
     </Modal>
   );
 }
@@ -2087,7 +2163,7 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
       if(cls&&sub&&r.day&&!isNaN(period)){
         count++;
         const id=uid();
-        toSync.push({id,class_id:cls.id,day:r.day,period,subject_id:sub.id,teacher_id:tch?.id||null});
+        toSync.push({id,class_id:cls.id,day:r.day,period,subject_id:sub.id,teacher_id:tch?.id||undefined});
         upd(s=>({...s,timetable:{...s.timetable,[cls.id]:[...(s.timetable[cls.id]||[]).filter(x=>!(x.day===r.day&&x.period===period)),{day:r.day,period,subjectId:sub.id,teacherId:tch?.id||""}]}}));
       }
     });
@@ -2193,7 +2269,7 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
                 const present=state.attendance[today]?.[s.rollNo];
                 return(
                   <div key={s.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-white/5">
-                    <div className="flex items-center gap-2"><img src={s.photo} className="w-7 h-7 rounded-full"/><span className="text-sm text-white">{s.name}</span></div>
+                    <div className="flex items-center gap-2"><img src={s.photo||undefined} className="w-7 h-7 rounded-full"/><span className="text-sm text-white">{s.name}</span></div>
                     <span className={`text-xs px-2 py-1 rounded-full font-mono ${present?"bg-emerald-500/20 text-emerald-400":"bg-red-500/10 text-red-400/60"}`}>{present?"Present":"Absent"}</span>
                   </div>
                 );
@@ -2494,7 +2570,7 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
                 const d=decProfile(st.profile);
                 return(
                   <tr key={st.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
-                    <td className="px-4 py-3"><img src={st.photo} className="w-8 h-8 rounded-full bg-white/10"/></td>
+                    <td className="px-4 py-3"><img src={st.photo||undefined} className="w-8 h-8 rounded-full bg-white/10"/></td>
                     <td className="px-4 py-3 font-mono text-xs text-white/40">{st.rollNo}</td>
                     <td className="px-4 py-3 text-sm text-white">{st.name}</td>
                     <td className="px-4 py-3 text-sm text-white/60">{cls?`${cls.name}-${cls.section}`:"–"}</td>
@@ -2512,47 +2588,8 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
       );
 
       case "marks": return(
-        <div className="space-y-4">
-          <h2 className="text-xl font-bold text-white">Marks Entry</h2>
-          <div className="flex gap-3 flex-wrap">
-            <select value={sc} onChange={e=>setSC(e.target.value)} className="bg-[#080D18] border border-white/10 text-white text-sm rounded-lg px-3 py-2 outline-none focus:border-blue-500/50">{state.classes.map(c=><option key={c.id} value={c.id}>Class {c.name}-{c.section}</option>)}</select>
-            <select value={ss} onChange={e=>setSS(e.target.value)} className="bg-[#080D18] border border-white/10 text-white text-sm rounded-lg px-3 py-2 outline-none focus:border-blue-500/50">{state.subjects.filter(s=>s.classIds.includes(sc)).map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select>
-          </div>
-          <div className="bg-[#080D18] border border-white/5 rounded-xl overflow-hidden">
-            <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between">
-              <span className="text-sm text-white/60">{state.subjects.find(s=>s.id===ss)?.name}</span>
-              <button onClick={async()=>{
-                const upds:Record<string,number>={};
-                Object.entries(me).forEach(([id,v])=>{const n=parseFloat(v);if(!isNaN(n))upds[id]=n;});
-                // Get current marks before update for merge
-                upd(s=>{
-                  const updated=s.students.map(st=>upds[st.id]!==undefined?{...st,marks:{...st.marks,[ss]:upds[st.id]}}:st);
-                  // Sync each updated student's marks to Supabase
-                  updated.filter(st=>upds[st.id]!==undefined).forEach(st=>{
-                    try{sb.update("students",st.id,{marks:st.marks});}catch{}
-                  });
-                  return {...s,students:updated};
-                });
-                setME({});
-              }} className="flex items-center gap-2 text-xs bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 px-3 py-1.5 rounded-lg hover:bg-emerald-500/30 transition-colors"><Save size={12}/>Save All</button>
-            </div>
-            <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead><tr className="border-b border-white/5">{["Student","Roll","Current","Enter /100"].map(h=><th key={h} className="text-left text-xs font-semibold text-white/40 uppercase px-4 py-3">{h}</th>)}</tr></thead>
-              <tbody>{state.students.filter(s=>s.classId===sc).map(st=>{
-                const cur=st.marks[ss];
-                return(
-                  <tr key={st.id} className="border-b border-white/5 hover:bg-white/5">
-                    <td className="px-4 py-3"><div className="flex items-center gap-2"><img src={st.photo} className="w-7 h-7 rounded-full"/><span className="text-sm text-white">{st.name}</span></div></td>
-                    <td className="px-4 py-3 font-mono text-xs text-white/40">{st.rollNo}</td>
-                    <td className="px-4 py-3">{cur!==undefined?<span className={`font-mono text-sm ${cur>=75?"text-emerald-400":cur>=40?"text-yellow-400":"text-red-400"}`}>{cur}</span>:<span className="text-white/20 text-xs">–</span>}</td>
-                    <td className="px-4 py-3"><input type="number" min="0" max="100" placeholder="0–100" value={me[st.id]??""} onChange={e=>setME(m=>({...m,[st.id]:e.target.value}))} className="w-24 bg-white/5 border border-white/10 text-white text-sm rounded-lg px-3 py-1.5 font-mono outline-none focus:border-blue-500/50"/></td>
-                  </tr>
-                );
-              })}</tbody>
-            </table>
-            </div>
-          </div>
+        <div className="-m-6">
+          <MarksEntry db={sb} user={user} state={state} setState={upd} exams={state.exams} />
         </div>
       );
 
@@ -2684,7 +2721,7 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
                       const present=state.attendance[todayDate]?.[st.rollNo];
                       return(
                         <div key={st.id} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
-                          <div className="flex items-center gap-2"><img src={st.photo} className="w-6 h-6 rounded-full"/><span className="text-sm text-white">{st.name}</span><span className="text-xs text-white/30 font-mono">{st.rollNo}</span></div>
+                          <div className="flex items-center gap-2"><img src={st.photo||undefined} className="w-6 h-6 rounded-full"/><span className="text-sm text-white">{st.name}</span><span className="text-xs text-white/30 font-mono">{st.rollNo}</span></div>
                           <div className="flex items-center gap-2">
                             <span className={`w-2 h-2 rounded-full ${present?"bg-emerald-400":"bg-white/10"}`}/>
                             <button onClick={()=>upd(s=>({...s,attendance:{...s.attendance,[todayDate]:{...(s.attendance[todayDate]||{}),[st.rollNo]:!present}}}))} className="text-xs text-white/30 hover:text-white/60 transition-colors">{present?"Undo":"Mark"}</button>
@@ -2704,7 +2741,7 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
                     const present=state.attendance[viewDate]?.[st.rollNo];
                     return(
                       <div key={st.id} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
-                        <div className="flex items-center gap-2"><img src={st.photo} className="w-6 h-6 rounded-full"/><span className="text-sm text-white">{st.name}</span><span className="text-xs text-white/30 font-mono">{st.rollNo}</span></div>
+                        <div className="flex items-center gap-2"><img src={st.photo||undefined} className="w-6 h-6 rounded-full"/><span className="text-sm text-white">{st.name}</span><span className="text-xs text-white/30 font-mono">{st.rollNo}</span></div>
                         <span className={`text-xs px-2 py-0.5 rounded-full ${present?"bg-emerald-500/20 text-emerald-400":"bg-white/5 text-white/30"}`}>{present?"Present":"Absent"}</span>
                       </div>
                     );
@@ -2730,12 +2767,11 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
           </div>
         );
         return(
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-bold text-white">Result Ledger</h2>
-              <button onClick={()=>{setLU(false);setLP("");}} className="text-xs text-white/30 hover:text-white/60 border border-white/10 px-3 py-2 rounded-lg transition-colors">Lock</button>
+          <div className="-m-6">
+            <div className="flex items-center justify-end px-6 py-2" style={{background:"#0a0f1e",borderBottom:"1px solid #1e3a6e"}}>
+              <button onClick={()=>{setLU(false);setLP("");}} className="text-xs text-white/30 hover:text-white/60 border border-white/10 px-3 py-2 rounded-lg transition-colors">🔒 Lock</button>
             </div>
-            <LedgerWithExams state={state} classId={sc} onClassChange={setSC}/>
+            <ResultLedger db={sb} user={user} state={state} setState={upd} />
           </div>
         );
 
@@ -2766,7 +2802,7 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
     const isEdit=popup.type.startsWith("edit");
     if(popup.type==="addClass"){return<AddClassModal state={state} sb={sb} upd={upd} close={close}/>;}
     // PHASE 1: Edit existing class teacher
-    if(popup.type==="editClass"){const cls=popup.data as Class;let tid=cls.teacherId;return<Modal title={`Edit Class ${cls.name}-${cls.section}`} onClose={close}><SelField label="Class Teacher" options={[{value:"",label:"— Unassigned —"},...state.teachers.map(t=>({value:t.id,label:t.name}))]} onChange={v=>tid=v}/><MBtn onClick={async()=>{upd(s=>({...s,classes:s.classes.map(c=>c.id===cls.id?{...c,teacherId:tid}:c)}));try{await sb.update("classes",cls.id,{teacher_id:tid||null});}catch(e){console.warn("[sb.classes update]",e);}close();}}>Save Changes</MBtn></Modal>;}
+    if(popup.type==="editClass"){const cls=popup.data as Class;let tid=cls.teacherId;return<Modal title={`Edit Class ${cls.name}-${cls.section}`} onClose={close}><SelField label="Class Teacher" options={[{value:"",label:"— Unassigned —"},...state.teachers.map(t=>({value:t.id,label:t.name}))]} onChange={v=>tid=v}/><MBtn onClick={async()=>{upd(s=>({...s,classes:s.classes.map(c=>c.id===cls.id?{...c,teacherId:tid}:c)}));try{await sb.update("classes",cls.id,{teacher_id:tid||undefined});}catch(e){console.warn("[sb.classes update]",e);}close();}}>Save Changes</MBtn></Modal>;}
     // PHASE 1: Added category field to addSubject
     if(popup.type==="addSubject"){return <AddSubjectForm state={state} upd={upd} sb={sb} close={close}/>;}
 
@@ -2902,7 +2938,7 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
         </Modal>
       );
     }
-    if(popup.type==="addSlot"){const{day,period,classId}=popup.data;let sid="",tid="";const csubs=state.subjects.filter(s=>s.classIds.includes(classId));return<Modal title={`Slot — ${day}, P${period}`} onClose={close}><SelField label="Subject" options={csubs.map(s=>({value:s.id,label:s.name}))} onChange={v=>sid=v}/><SelField label="Teacher" options={state.teachers.map(t=>({value:t.id,label:t.name}))} onChange={v=>tid=v}/><MBtn onClick={async()=>{if(sid){const id=uid();upd(s=>({...s,timetable:{...s.timetable,[classId]:[...(s.timetable[classId]||[]),{day,period,subjectId:sid,teacherId:tid}]}}));try{await sb.upsert("timetable",{id,class_id:classId,day,period,subject_id:sid,teacher_id:tid||null});}catch(e){console.warn("[sb.timetable]",e);}close();}}}>Add</MBtn></Modal>;}
+    if(popup.type==="addSlot"){const{day,period,classId}=popup.data;let sid="",tid="";const csubs=state.subjects.filter(s=>s.classIds.includes(classId));return<Modal title={`Slot — ${day}, P${period}`} onClose={close}><SelField label="Subject" options={csubs.map(s=>({value:s.id,label:s.name}))} onChange={v=>sid=v}/><SelField label="Teacher" options={state.teachers.map(t=>({value:t.id,label:t.name}))} onChange={v=>tid=v}/><MBtn onClick={async()=>{if(sid){const id=uid();upd(s=>({...s,timetable:{...s.timetable,[classId]:[...(s.timetable[classId]||[]),{day,period,subjectId:sid,teacherId:tid}]}}));try{await sb.upsert("timetable",{id,class_id:classId,day,period,subject_id:sid,teacher_id:tid||undefined});}catch(e){console.warn("[sb.timetable]",e);}close();}}}>Add</MBtn></Modal>;}
     if(popup.type==="addSupportAdmin"){let n="",e="",p="";return<Modal title="Add Support Admin" onClose={close}><Field label="Full Name" onChange={v=>n=v}/><Field label="Email" onChange={v=>e=v}/><Field label="Password" onChange={v=>p=v}/><MBtn onClick={()=>{if(n&&e&&p){upd(s=>({...s,supportAdmins:[...s.supportAdmins,{id:uid(),name:n,email:e,password:p}]}));close();}}}>Create</MBtn></Modal>;}
     return null;
   }
@@ -3398,7 +3434,7 @@ function TeacherView({user,state,setState,onLogout,onBackToSite,db}:
                     : st.marks[ss];
                   return(
                     <tr key={st.id} className="border-b border-white/5 hover:bg-white/5">
-                      <td className="px-4 py-3"><div className="flex items-center gap-2"><img src={st.photo} className="w-7 h-7 rounded-full"/><span className="text-sm text-white">{st.name}</span></div></td>
+                      <td className="px-4 py-3"><div className="flex items-center gap-2"><img src={st.photo||undefined} className="w-7 h-7 rounded-full"/><span className="text-sm text-white">{st.name}</span></div></td>
                       <td className="px-4 py-3 font-mono text-xs text-white/40">{st.rollNo}</td>
                       <td className="px-4 py-3">{cur!==undefined?<span className={`font-mono text-sm ${cur>=75?"text-emerald-400":cur>=40?"text-yellow-400":"text-red-400"}`}>{cur}</span>:<span className="text-white/20 text-xs">–</span>}</td>
                       <td className="px-4 py-3"><input type="number" min="0" max="100" placeholder="0–100" value={me[st.id]??""} onChange={e=>setME(m=>({...m,[st.id]:e.target.value}))} className="w-24 bg-white/5 border border-white/10 text-white text-sm rounded-lg px-3 py-1.5 font-mono outline-none focus:border-blue-500/50"/></td>
@@ -3504,7 +3540,7 @@ function TeacherView({user,state,setState,onLogout,onBackToSite,db}:
                         <tr key={st.id} className="border-b border-white/5 hover:bg-white/5">
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-2">
-                              <img src={st.photo} className="w-7 h-7 rounded-full"/>
+                              <img src={st.photo||undefined} className="w-7 h-7 rounded-full"/>
                               <div>
                                 <div className="text-sm text-white">{st.name}</div>
                                 <div className="text-xs text-white/30 font-mono">{st.rollNo}{d.bloodGroup&&<span className="ml-1.5 text-red-400/70">{d.bloodGroup}</span>}</div>
@@ -3708,7 +3744,7 @@ function TeacherView({user,state,setState,onLogout,onBackToSite,db}:
               <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between"><span className="text-xs font-semibold text-white/50 uppercase">Today — {todayDate}</span><span className="text-xs text-white/30">{myStudents.filter(s=>state.attendance[todayDate]?.[s.rollNo]).length}/{myStudents.length} Present</span></div>
               <div className="divide-y divide-white/5">{myStudents.map(s=>{
                 const present=state.attendance[todayDate]?.[s.rollNo];
-                return(<div key={s.id} className="flex items-center justify-between px-4 py-3"><div className="flex items-center gap-2"><img src={s.photo} className="w-7 h-7 rounded-full"/><span className="text-sm text-white">{s.name}</span><span className="text-xs text-white/30 font-mono">{s.rollNo}</span></div>
+                return(<div key={s.id} className="flex items-center justify-between px-4 py-3"><div className="flex items-center gap-2"><img src={s.photo||undefined} className="w-7 h-7 rounded-full"/><span className="text-sm text-white">{s.name}</span><span className="text-xs text-white/30 font-mono">{s.rollNo}</span></div>
                   <button onClick={()=>setState(st=>({...st,attendance:{...st.attendance,[todayDate]:{...(st.attendance[todayDate]||{}),[s.rollNo]:!present}}}))} className={`text-xs px-3 py-1.5 rounded-full font-medium transition-all ${present?"bg-emerald-500/20 text-emerald-400 border border-emerald-500/30":"bg-red-500/10 text-red-400/60 border border-red-500/10 hover:border-emerald-500/30 hover:text-emerald-400"}`}>{present?"Present":"Absent"}</button>
                 </div>);
               })}</div>
@@ -3744,7 +3780,7 @@ function TeacherView({user,state,setState,onLogout,onBackToSite,db}:
                       return(
                         <div key={s.id} className="flex items-center justify-between px-4 py-3">
                           <div className="flex items-center gap-2">
-                            <img src={s.photo} className="w-7 h-7 rounded-full"/>
+                            <img src={s.photo||undefined} className="w-7 h-7 rounded-full"/>
                             <span className="text-sm text-white">{s.name}</span>
                             <span className="text-xs text-white/30 font-mono">{s.rollNo}</span>
                             <span className="text-xs text-white/20">{cls?.name}-{cls?.section}</span>
@@ -3812,7 +3848,7 @@ function TeacherView({user,state,setState,onLogout,onBackToSite,db}:
               <table className="w-full"><thead><tr className="border-b border-white/5">{["Student","Category","Amount","Due","Status"].map(h=><th key={h} className="text-left text-xs text-white/40 uppercase px-4 py-3">{h}</th>)}</tr></thead>
                 <tbody>{filteredRecs.map(rec=>{const st=state.students.find(s=>s.id===rec.studentId);return(
                   <tr key={rec.id} className="border-b border-white/5 hover:bg-white/3">
-                    <td className="px-4 py-3"><div className="flex items-center gap-2"><img src={st?.photo||""} className="w-7 h-7 rounded-full"/><span className="text-sm text-white">{st?.name}</span></div></td>
+                    <td className="px-4 py-3"><div className="flex items-center gap-2"><img src={st?.photo||undefined} className="w-7 h-7 rounded-full"/><span className="text-sm text-white">{st?.name}</span></div></td>
                     <td className="px-4 py-3 text-xs text-white/50 capitalize">{rec.category}</td>
                     <td className="px-4 py-3 text-sm font-mono text-white">{currency} {rec.amount.toLocaleString()}</td>
                     <td className="px-4 py-3 text-xs text-white/40">{rec.dueDate}</td>
@@ -4069,7 +4105,7 @@ function StudentView({user,state,setState,onLogout,onBackToSite}:
         <div className="space-y-6 max-w-2xl">
           <div className="bg-gradient-to-br from-blue-600/20 to-purple-600/10 border border-blue-500/20 rounded-2xl p-6">
             <div className="flex items-center gap-4">
-              <img src={student.photo} className="w-16 h-16 rounded-2xl border-2 border-blue-500/30 object-cover"/>
+              <img src={student.photo||undefined} className="w-16 h-16 rounded-2xl border-2 border-blue-500/30 object-cover"/>
               <div className="flex-1">
                 <p className="text-white/50 text-xs mb-1">Welcome back</p>
                 <h2 className="text-xl font-bold text-white">{student.name}</h2>
@@ -4379,7 +4415,7 @@ function CounselingInner({state,setState,db}:{state:AppState;setState:(fn:(s:App
             const flags=state.counseling.profiles.find(p=>p.studentId===st.id)?.flags||[];
             return(
               <button key={st.id} onClick={()=>{setSelId(st.id);setEditBg(false);}} className={`w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all ${selId===st.id?"bg-purple-600/20 border border-purple-500/30":"border border-transparent hover:bg-white/5"}`}>
-                <img src={st.photo} className="w-8 h-8 rounded-full flex-shrink-0"/>
+                <img src={st.photo||undefined} className="w-8 h-8 rounded-full flex-shrink-0"/>
                 <div className="min-w-0 flex-1">
                   <div className="text-white text-xs font-semibold truncate">{st.name}</div>
                   <div className="text-white/30 text-[10px] font-mono">{st.rollNo}</div>
@@ -4851,7 +4887,7 @@ function FeesInner({state,setState,db}:{state:AppState;setState:(fn:(s:AppState)
               return(
                 <tr key={r.id} className="border-b border-white/5 hover:bg-white/3 transition-colors">
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-2"><img src={st?.photo||""} className="w-7 h-7 rounded-full"/><div><div className="text-white text-xs font-semibold">{st?.name}</div><div className="text-white/30 text-[10px] font-mono">{st?.rollNo} · {cls?.name}-{cls?.section}</div></div></div>
+                    <div className="flex items-center gap-2"><img src={st?.photo||undefined} className="w-7 h-7 rounded-full"/><div><div className="text-white text-xs font-semibold">{st?.name}</div><div className="text-white/30 text-[10px] font-mono">{st?.rollNo} · {cls?.name}-{cls?.section}</div></div></div>
                   </td>
                   <td className="px-4 py-3"><span className={`text-[10px] px-2 py-0.5 rounded-full ${CAT_COLORS[r.category]}`}>{CAT_LABELS[r.category]}</span></td>
                   <td className="px-4 py-3 text-white/70 text-xs">{r.label}</td>
@@ -5293,7 +5329,7 @@ function BehaviorModule({state,setState,db,filterStudentIds}:{state:AppState;set
                 <div className={`w-2 h-2 rounded-full mt-2 flex-shrink-0 ${SEV_CFG[rec.severity].dot}`}/>
                 {/* Student */}
                 <div className="flex items-center gap-3 w-40 flex-shrink-0">
-                  <img src={st?.photo||""} className="w-8 h-8 rounded-full"/>
+                  <img src={st?.photo||undefined} className="w-8 h-8 rounded-full"/>
                   <div>
                     <div className="text-white text-xs font-semibold">{st?.name}</div>
                     <div className="text-white/30 text-[10px] font-mono">{st?.rollNo} · {cls?.name}-{cls?.section}</div>
