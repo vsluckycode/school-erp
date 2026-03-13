@@ -252,6 +252,10 @@ export default function MarksEntry({ db, user, state, setState, exams: examsProp
   const [olBasket,        setOlBasket]        = useState({basket1:"commerce",basket2:"music_pera",basket3:"ict"});
   const [filter,          setFilter]          = useState("");
   const [error,           setError]           = useState("");
+  const [csvImportModal,  setCsvImportModal]  = useState(false);
+  const [csvPreview,      setCsvPreview]      = useState(null); // { rows, errors, matched }
+  const [csvApplying,     setCsvApplying]     = useState(false);
+  const csvFileRef = useRef(null);
   const inputRefs = useRef({});
   const tableScrollRef = useRef(null);
 
@@ -391,6 +395,211 @@ export default function MarksEntry({ db, user, state, setState, exams: examsProp
     [...students].map(s=>({...s,t:calcTotal(s)})).sort((a,b)=>b.t-a.t).map((s,i)=>[s.id,i+1])
   );
   const displayStudents=students.filter(s=>filter===""||s.name.toLowerCase().includes(filter.toLowerCase())||s.admNo.includes(filter));
+
+  // ── CSV Export (example template) ─────────────────────────────────────────
+  function downloadExampleCsv() {
+    const subjectHeaders = allSubjects.length > 0
+      ? allSubjects.map(s => s.code)
+      : ["SUBJECT_CODE_1", "SUBJECT_CODE_2", "SUBJECT_CODE_3"];
+    const headerRow = ["adm_no", "name", ...subjectHeaders];
+    const dataRows = students.length > 0
+      ? students.map(s => [s.admNo, s.name, ...subjectHeaders.map(() => "")])
+      : [
+          ["ADM001", "Example Student 1", ...subjectHeaders.map(() => "")],
+          ["ADM002", "Example Student 2", ...subjectHeaders.map(() => "")],
+          ["ADM003", "Example Student 3", ...subjectHeaders.map(() => "")],
+        ];
+    const csv = [headerRow, ...dataRows]
+      .map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `marks_template_Gr${selectedGrade}${selectedClass}_${selectedExam||"term"}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // ── CSV Parse & Preview ────────────────────────────────────────────────────
+  function parseCsvText(text) {
+    const lines = text.trim().split(/\r?\n/).filter(l => l.trim());
+    if (lines.length < 2) return { rows: [], errors: ["CSV has no data rows."], matched: 0, hint: null };
+
+    // Simple CSV split — handles quoted fields
+    function splitRow(line) {
+      const result = [];
+      let cur = "", inQ = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') {
+          if (inQ && line[i+1] === '"') { cur += '"'; i++; }
+          else inQ = !inQ;
+        } else if (ch === ',' && !inQ) { result.push(cur.trim()); cur = ""; }
+        else cur += ch;
+      }
+      result.push(cur.trim());
+      return result;
+    }
+
+    const rawHeaders = splitRow(lines[0]);
+    const headers = rawHeaders.map(h => h.toLowerCase().trim().replace(/^"|"$/g, ""));
+
+    // Accept adm_no OR rollno / roll_no as the ID column
+    const ADM_ALIASES  = ["adm_no", "rollno", "roll_no", "admission_no", "adm", "roll"];
+    const NAME_ALIASES = ["name", "student_name", "full_name"];
+
+    const admIdx  = headers.findIndex(h => ADM_ALIASES.includes(h));
+    const nameIdx = headers.findIndex(h => NAME_ALIASES.includes(h));
+
+    // Columns that are clearly non-marks metadata — always skip these
+    const SKIP_COLS = new Set([
+      "class","section","grade","password","pass","dob","date_of_birth",
+      "gender","phone","address","parent_name","parent_phone",
+      "blood_group","bloodgroup","email","nic","qualification",
+      "join_date","joindate","status","photo","id"
+    ]);
+
+    if (admIdx === -1 && nameIdx === -1) {
+      return {
+        rows: [], matched: 0, hint: null,
+        errors: [
+          `Could not find a student identifier column.`,
+          `Your CSV headers are: ${rawHeaders.slice(0,8).join(", ")}${rawHeaders.length>8?"…":""}`,
+          `Expected one of: adm_no, rollno, name (or similar).`,
+        ]
+      };
+    }
+
+    // Map subject columns: match by code (case-insensitive) or by subject label
+    const subjectColMap = {}; // colIndex -> subjectId
+    const skippedNonSubject = [];
+    const unrecognisedSubjectHeaders = [];
+
+    headers.forEach((h, i) => {
+      if (i === admIdx || i === nameIdx) return;
+      if (SKIP_COLS.has(h)) { skippedNonSubject.push(rawHeaders[i]); return; }
+      const sub = allSubjects.find(s =>
+        String(s.code).toLowerCase() === h ||
+        s.label.toLowerCase() === h ||
+        s.label.toLowerCase().replace(/\s+/g,"_") === h
+      );
+      if (sub) subjectColMap[i] = sub.id;
+      else unrecognisedSubjectHeaders.push(rawHeaders[i]);
+    });
+
+    const errors = [];
+
+    if (Object.keys(subjectColMap).length === 0) {
+      // Build a helpful message showing what the CSV has vs what subjects exist
+      const csvDataCols = headers.filter((_,i) => i!==admIdx && i!==nameIdx && !SKIP_COLS.has(headers[i]));
+      const expectedCodes = allSubjects.map(s => s.code);
+
+      errors.push(
+        `This looks like a student-list CSV, not a marks CSV.`
+      );
+      if (csvDataCols.length > 0) {
+        errors.push(
+          `Your CSV has columns: ${csvDataCols.slice(0,6).map(c=>rawHeaders[headers.indexOf(c)]).join(", ")}${csvDataCols.length>6?"…":""} — none match any subject.`
+        );
+      }
+      if (expectedCodes.length > 0) {
+        errors.push(
+          `This class has ${allSubjects.length} subject${allSubjects.length!==1?"s":""}: ${expectedCodes.join(", ")}.`
+        );
+        errors.push(
+          `👉 Download the "Example CSV" template — it already has the correct subject-code headers filled in.`
+        );
+      } else {
+        errors.push(`No subjects are configured for Grade ${selectedGrade}${selectedClass} yet. Add subjects in the Subjects tab first.`);
+      }
+      return { rows: [], errors, matched: 0, hint: "use_template" };
+    }
+
+    // Warn about unrecognised columns that weren't skipped (possible typos in subject codes)
+    if (unrecognisedSubjectHeaders.length > 0) {
+      errors.push(
+        `Ignored unrecognised column${unrecognisedSubjectHeaders.length!==1?"s":""}: ${unrecognisedSubjectHeaders.join(", ")} (not a known subject code or name).`
+      );
+    }
+
+    const rows = [];
+    let matched = 0;
+
+    for (let li = 1; li < lines.length; li++) {
+      const cols = splitRow(lines[li]);
+      const admNo = admIdx >= 0 ? (cols[admIdx]||"").trim().replace(/^"|"$/g,"") : "";
+      const name  = nameIdx >= 0 ? (cols[nameIdx]||"").trim().replace(/^"|"$/g,"") : "";
+      if (!admNo && !name) continue; // blank row
+
+      // Match student: by admNo first, then by name (case-insensitive)
+      const student = students.find(s =>
+        (admNo && (s.admNo === admNo || s.admNo === String(Number(admNo)))) ||
+        (name  && s.name.toLowerCase().trim() === name.toLowerCase().trim())
+      );
+
+      if (!student) {
+        if (admNo || name) errors.push(`Row ${li+1}: "${name||admNo}" not found in Grade ${selectedGrade}${selectedClass} — skipped.`);
+        continue;
+      }
+
+      const marks = {};
+      Object.entries(subjectColMap).forEach(([colIdx, subId]) => {
+        const raw = (cols[colIdx]||"").trim().replace(/^"|"$/g,"").toLowerCase();
+        if (raw === "") return;
+        if (raw === "ab" || raw === "absent") { marks[subId] = "ab"; return; }
+        const n = Number(raw);
+        if (isNaN(n) || n < 0 || n > 100) {
+          errors.push(`Row ${li+1} (${student.name}): invalid mark "${raw}" — must be 0–100 or "ab".`);
+          return;
+        }
+        marks[subId] = String(n);
+      });
+
+      rows.push({ student, marks });
+      matched++;
+    }
+
+    return { rows, errors, matched, hint: null };
+  }
+
+  function handleCsvFileChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const result = parseCsvText(ev.target.result);
+      setCsvPreview(result);
+      setCsvImportModal(true);
+    };
+    reader.readAsText(file);
+    // reset input so same file can be re-selected
+    e.target.value = "";
+  }
+
+  function applyCsvImport() {
+    if (!csvPreview?.rows?.length) return;
+    setCsvApplying(true);
+    setStudents(prev => {
+      const updated = [...prev];
+      csvPreview.rows.forEach(({ student, marks }) => {
+        const idx = updated.findIndex(s => s.id === student.id);
+        if (idx === -1) return;
+        const merged = { ...updated[idx].marks };
+        Object.entries(marks).forEach(([subId, val]) => {
+          const sub = allSubjects.find(s => s.id === subId);
+          if (sub && canEditSubject(sub)) merged[subId] = val;
+        });
+        updated[idx] = { ...updated[idx], marks: merged };
+      });
+      return updated;
+    });
+    setTimeout(() => {
+      setCsvApplying(false);
+      setCsvImportModal(false);
+      setCsvPreview(null);
+    }, 300);
+  }
 
   // ── Bulk save ──────────────────────────────────────────────────────────────
   async function handleBulkSave() {
@@ -603,9 +812,31 @@ export default function MarksEntry({ db, user, state, setState, exams: examsProp
           {" · "}<span style={{color:"#60a5fa"}}>{selectedExam||"(no exam selected)"}</span>
           {" · "}{academicYear}
         </span>
-        <div style={{marginLeft:"auto",display:"flex",gap:8,alignItems:"center"}}>
+        <div style={{marginLeft:"auto",display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
           <input placeholder="🔍 Search student…" value={filter} onChange={e=>setFilter(e.target.value)}
             style={{padding:"6px 12px",borderRadius:8,background:"#334155",border:"1px solid #475569",color:"#e2e8f0",fontSize:13,width:200}}/>
+
+          {/* ⬇ Example CSV — always visible so user can see the format even before subjects/students are set up */}
+          <button onClick={downloadExampleCsv}
+            title="Download a CSV template pre-filled with student adm numbers & names"
+            style={{padding:"7px 13px",borderRadius:8,background:"#0f3d2e",border:"1px solid #16a34a55",color:"#4ade80",
+              cursor:"pointer",fontWeight:600,fontSize:12,display:"flex",alignItems:"center",gap:5,whiteSpace:"nowrap"}}>
+            ⬇ Example CSV
+          </button>
+
+          {/* ⬆ Import CSV — only for users who can edit */}
+          {perms.canEdit && (
+            <>
+              <input ref={csvFileRef} type="file" accept=".csv,text/csv" style={{display:"none"}} onChange={handleCsvFileChange}/>
+              <button onClick={()=>csvFileRef.current?.click()} disabled={loading}
+                title="Upload a CSV to bulk-fill marks"
+                style={{padding:"7px 13px",borderRadius:8,background:"#1a2f4a",border:"1px solid #2563eb55",color:"#60a5fa",
+                  cursor:loading?"not-allowed":"pointer",fontWeight:600,fontSize:12,display:"flex",alignItems:"center",gap:5,whiteSpace:"nowrap",opacity:loading?0.5:1}}>
+                ⬆ Import CSV
+              </button>
+            </>
+          )}
+
           {perms.canEdit?(
             <button onClick={handleBulkSave} disabled={saving||loading||(examMode==="exam"&&!selectedExamId)}
               style={{padding:"7px 20px",borderRadius:8,background:saving?"#1e3a5f":"#2563eb",color:"#fff",border:"none",
@@ -735,6 +966,162 @@ export default function MarksEntry({ db, user, state, setState, exams: examsProp
       )}
 
       {/* Grade legend moved to top of page */}
+
+      {/* ── CSV Import Modal ─────────────────────────────────────────────── */}
+      {csvImportModal && csvPreview && (
+        <div style={{position:"fixed",inset:0,zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16,background:"rgba(0,0,0,0.75)",backdropFilter:"blur(4px)"}}
+          onClick={()=>{ setCsvImportModal(false); setCsvPreview(null); }}>
+          <div style={{background:"#0d1829",border:"1px solid #1e3a5f",borderRadius:16,width:"100%",maxWidth:580,maxHeight:"85vh",display:"flex",flexDirection:"column",boxShadow:"0 25px 60px rgba(0,0,0,0.7)"}}
+            onClick={e=>e.stopPropagation()}>
+
+            {/* Modal header */}
+            <div style={{padding:"18px 22px 14px",borderBottom:"1px solid #1e293b",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div>
+                <h3 style={{margin:0,fontSize:17,fontWeight:700,color:"#f1f5f9"}}>⬆ CSV Import Preview</h3>
+                <p style={{margin:"3px 0 0",fontSize:12,color:"#64748b"}}>
+                  Grade {selectedGrade}{selectedClass} · {selectedExam||"term"} · {academicYear}
+                </p>
+              </div>
+              <button onClick={()=>{ setCsvImportModal(false); setCsvPreview(null); }}
+                style={{background:"none",border:"none",color:"#475569",cursor:"pointer",fontSize:20,lineHeight:1,padding:4}}>✕</button>
+            </div>
+
+            {/* Stats bar */}
+            <div style={{padding:"12px 22px",borderBottom:"1px solid #1e293b",display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
+              <span style={{fontSize:13,color:csvPreview.matched>0?"#4ade80":"#64748b",background:csvPreview.matched>0?"#0f3d2e":"#1e293b",padding:"4px 12px",borderRadius:20,fontWeight:600}}>
+                ✓ {csvPreview.matched} student{csvPreview.matched!==1?"s":""} matched
+              </span>
+              {csvPreview.matched > 0 && (
+                <span style={{fontSize:13,color:"#60a5fa",background:"#1e3a5f",padding:"4px 12px",borderRadius:20,fontWeight:600}}>
+                  {csvPreview.rows.reduce((acc,r)=>acc+Object.keys(r.marks).length,0)} marks to import
+                </span>
+              )}
+              {csvPreview.errors.length > 0 && (
+                <span style={{fontSize:13,color:"#fb923c",background:"#431407",padding:"4px 12px",borderRadius:20,fontWeight:600}}>
+                  ⚠ {csvPreview.errors.length} issue{csvPreview.errors.length!==1?"s":""}
+                </span>
+              )}
+            </div>
+
+            {/* Scrollable body */}
+            <div style={{flex:1,overflowY:"auto",padding:"16px 22px",display:"flex",flexDirection:"column",gap:14}}>
+
+              {/* Wrong-file hint banner */}
+              {csvPreview.hint === "use_template" && (
+                <div style={{background:"#0c1f3a",border:"1px solid #2563eb55",borderRadius:12,padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontSize:22}}>💡</span>
+                    <span style={{fontSize:14,fontWeight:700,color:"#93c5fd"}}>Wrong CSV format</span>
+                  </div>
+                  <p style={{margin:0,fontSize:13,color:"#94a3b8",lineHeight:1.6}}>
+                    This looks like a <strong style={{color:"#e2e8f0"}}>student list CSV</strong>, not a marks CSV.
+                    The marks CSV needs subject codes as column headers.
+                  </p>
+                  <div style={{background:"#0a1525",borderRadius:8,padding:"10px 12px",fontSize:12,fontFamily:"monospace",color:"#64748b",lineHeight:1.8}}>
+                    <span style={{color:"#60a5fa"}}>adm_no</span>,<span style={{color:"#60a5fa"}}>name</span>
+                    {allSubjects.length>0 && allSubjects.slice(0,4).map(s=>(
+                      <span key={s.id}>,<span style={{color:"#4ade80"}}>{s.code}</span></span>
+                    ))}
+                    {allSubjects.length>4&&<span style={{color:"#475569"}}>…</span>}
+                    <br/>
+                    <span style={{color:"#94a3b8"}}>10000,AGMM Wijerathna</span>
+                    {allSubjects.length>0 && allSubjects.slice(0,4).map(s=>(
+                      <span key={s.id} style={{color:"#fbbf24"}}>,85</span>
+                    ))}
+                  </div>
+                  <button onClick={()=>{ setCsvImportModal(false); setCsvPreview(null); downloadExampleCsv(); }}
+                    style={{alignSelf:"flex-start",padding:"8px 16px",borderRadius:8,background:"#16a34a",border:"none",color:"#fff",
+                      cursor:"pointer",fontWeight:700,fontSize:13,display:"flex",alignItems:"center",gap:6}}>
+                    ⬇ Download Marks Template for Grade {selectedGrade}{selectedClass}
+                  </button>
+                </div>
+              )}
+
+              {/* Issues / warnings list */}
+              {csvPreview.errors.length > 0 && csvPreview.hint !== "use_template" && (
+                <div style={{background:"#1c0f05",border:"1px solid #78350f",borderRadius:10,padding:"12px 14px"}}>
+                  <p style={{margin:"0 0 8px",fontSize:12,fontWeight:700,color:"#fb923c"}}>
+                    ⚠ Issues ({csvPreview.errors.length}):
+                  </p>
+                  <ul style={{margin:0,padding:"0 0 0 16px",display:"flex",flexDirection:"column",gap:4}}>
+                    {csvPreview.errors.map((e,i)=>(
+                      <li key={i} style={{fontSize:12,color:"#fdba74",lineHeight:1.5}}>{e}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Preview table */}
+              {csvPreview.rows.length === 0 && csvPreview.hint !== "use_template" ? (
+                <div style={{textAlign:"center",padding:"24px 0",color:"#64748b"}}>
+                  <p style={{fontSize:32,margin:"0 0 8px"}}>📭</p>
+                  <p style={{fontSize:14,margin:0,color:"#475569"}}>No valid rows to import.</p>
+                  <p style={{fontSize:12,marginTop:6,color:"#334155",lineHeight:1.6}}>
+                    Make sure <code style={{color:"#60a5fa",background:"#0f172a",padding:"1px 5px",borderRadius:4}}>adm_no</code> or <code style={{color:"#60a5fa",background:"#0f172a",padding:"1px 5px",borderRadius:4}}>rollno</code> values match existing students,<br/>
+                    and column headers match subject codes for this class.
+                  </p>
+                </div>
+              ) : csvPreview.rows.length > 0 ? (
+                <div style={{overflowX:"auto",borderRadius:10,border:"1px solid #1e293b"}}>
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                    <thead>
+                      <tr style={{background:"#1e293b"}}>
+                        <th style={{padding:"8px 10px",textAlign:"left",color:"#94a3b8",fontWeight:600,borderBottom:"1px solid #334155",whiteSpace:"nowrap"}}>Adm No</th>
+                        <th style={{padding:"8px 10px",textAlign:"left",color:"#94a3b8",fontWeight:600,borderBottom:"1px solid #334155",whiteSpace:"nowrap"}}>Name</th>
+                        {allSubjects.filter(s => csvPreview.rows.some(r => s.id in r.marks)).map(s=>(
+                          <th key={s.id} style={{padding:"8px 8px",textAlign:"center",color:"#4ade80",fontWeight:700,borderBottom:"1px solid #334155",whiteSpace:"nowrap"}}>
+                            {s.code}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {csvPreview.rows.map(({student,marks},ri)=>(
+                        <tr key={ri} style={{background:ri%2===0?"#0a1020":"#0d1424",borderBottom:"1px solid #1e293b"}}>
+                          <td style={{padding:"6px 10px",color:"#94a3b8",fontFamily:"monospace"}}>{student.admNo}</td>
+                          <td style={{padding:"6px 10px",color:"#e2e8f0",fontWeight:500,whiteSpace:"nowrap"}}>{student.name}</td>
+                          {allSubjects.filter(s => csvPreview.rows.some(r => s.id in r.marks)).map(s=>{
+                            const v = marks[s.id];
+                            const gp = v ? gradePoint(v) : "";
+                            return(
+                              <td key={s.id} style={{padding:"6px 8px",textAlign:"center"}}>
+                                {v !== undefined ? (
+                                  <span style={{fontWeight:700,color:gradeColor(gp||"-"),fontSize:13}}>
+                                    {v==="ab"?"AB":v}
+                                    {gp&&gp!=="AB"&&<span style={{fontSize:10,marginLeft:3,opacity:0.7}}>{gp}</span>}
+                                  </span>
+                                ) : <span style={{color:"#334155"}}>—</span>}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+            </div>
+
+            {/* Footer actions */}
+            <div style={{padding:"14px 22px",borderTop:"1px solid #1e293b",display:"flex",gap:10,justifyContent:"flex-end"}}>
+              <button onClick={()=>{ setCsvImportModal(false); setCsvPreview(null); }}
+                style={{padding:"8px 20px",borderRadius:8,background:"transparent",border:"1px solid #334155",color:"#64748b",cursor:"pointer",fontWeight:600,fontSize:13}}>
+                {csvPreview.hint==="use_template" ? "Close" : "Cancel"}
+              </button>
+              {csvPreview.hint !== "use_template" && (
+                <button
+                  onClick={applyCsvImport}
+                  disabled={csvApplying || csvPreview.rows.length === 0}
+                  style={{padding:"8px 24px",borderRadius:8,background:csvApplying||csvPreview.rows.length===0?"#1e3a5f":"#2563eb",
+                    color:"#fff",border:"none",cursor:csvApplying||csvPreview.rows.length===0?"not-allowed":"pointer",
+                    fontWeight:700,fontSize:13,opacity:csvPreview.rows.length===0?0.5:1}}>
+                  {csvApplying ? "⏳ Applying…" : `✓ Apply ${csvPreview.matched} Student${csvPreview.matched!==1?"s":""}`}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

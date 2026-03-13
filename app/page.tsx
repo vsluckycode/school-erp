@@ -201,7 +201,7 @@ interface TeacherProfile { dob?:string; gender?:string; address?:string; phone?:
 // PHASE 1: Subject categories
 type SubjectCategory = "Arts" | "Science" | "Commerce" | "General";
 
-interface Student { id:string; name:string; rollNo:string; classId:string; photo:string; marks:Record<string,number>; password:string; profile?:StudentProfile; status?:"pending"|"approved"; }
+interface Student { id:string; name:string; rollNo:string; classId:string; photo:string; marks:Record<string,number>; password:string; email?:string; profile?:StudentProfile; status?:"pending"|"approved"; }
 // PHASE 2: is_counselor, is_bursar roles on Teacher
 interface Teacher { id:string; name:string; email:string; subjectIds:string[]; classIds:string[]; password:string; photo?:string; profile?:TeacherProfile; status?:"pending"|"approved"; is_counselor?:boolean; is_bursar?:boolean; }
 // PHASE 1: category on Subject
@@ -816,16 +816,23 @@ function downloadTeacherTimetablePDF(teacher:Teacher, state:AppState){
 }
 
 // ─── Student Profile Modal ────────────────────────────────────────────────────
-function StudentProfileModal({student,state,onSave,onClose}:{student:Student;state:AppState;onSave:(s:Student)=>void;onClose:()=>void}){
+function StudentProfileModal({student,state,onSave,onClose,userRole}:{student:Student;state:AppState;onSave:(s:Student)=>void;onClose:()=>void;userRole?:string}){
   const d=decProfile(student.profile);
   const [sName,setSName]=useState(student.name);
   const [sRoll,setSRoll]=useState(student.rollNo);
   const [sClass,setSClass]=useState(student.classId);
   const [photo,setPhoto]=useState(student.photo||"");
   const [form,setForm]=useState({dob:d.dob||"",gender:d.gender||"",phone:d.phone||"",address:d.address||"",parentName:d.parentName||"",parentPhone:d.parentPhone||"",bloodGroup:d.bloodGroup||"",nic:d.nic||""});
+  // Login credentials
+  const [sEmail,setSEmail]=useState(student.email||"");
+  const [sPass,setSPass]=useState(student.password||"");
+  const [showPass,setShowPass]=useState(false);
+  const [credMsg,setCredMsg]=useState("");
   const set=(k:keyof typeof form)=>(v:string)=>setForm(f=>({...f,[k]:v}));
   const cls=state.classes.find(c=>c.id===student.classId);
   const [showIDCard,setShowIDCard]=useState(false);
+  // Only admin, support_admin, class_teacher can edit credentials
+  const canEditCreds = userRole==="admin"||userRole==="support_admin"||userRole==="teacher";
   function handlePhoto(e:React.ChangeEvent<HTMLInputElement>){
     const file=e.target.files?.[0];if(!file)return;
     if(file.size>2*1024*1024){alert("Image must be under 2MB");return;}
@@ -834,8 +841,22 @@ function StudentProfileModal({student,state,onSave,onClose}:{student:Student;sta
     reader.readAsDataURL(file);
   }
   function save(){
+    if(canEditCreds && sPass.trim() && sPass.trim().length < 6){
+      setCredMsg("Password must be at least 6 characters.");return;
+    }
     const enc=encProfile(form);
-    const updated:Student={...student,name:sName.trim()||student.name,rollNo:sRoll.trim()||student.rollNo,classId:sClass,profile:enc,photo:photo||student.photo};
+    const updated:Student={
+      ...student,
+      name:sName.trim()||student.name,
+      rollNo:sRoll.trim()||student.rollNo,
+      classId:sClass,
+      profile:enc,
+      photo:photo||student.photo,
+      ...(canEditCreds?{
+        email: sEmail.trim()||student.email,
+        password: sPass.trim()||student.password,
+      }:{}),
+    };
     try{localStorage.setItem(`student_profile_${student.id}`,JSON.stringify(enc));}catch{}
     onSave(updated);
     onClose();
@@ -871,6 +892,45 @@ function StudentProfileModal({student,state,onSave,onClose}:{student:Student;sta
         <button onClick={onClose} className="ml-2 text-white/30 hover:text-white/60 transition-colors flex-shrink-0"><X size={16}/></button>
       </div>
       <div className="flex items-center gap-1.5 text-xs text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 rounded-lg px-3 py-2 mb-5"><Shield size={11}/>PII is encrypted before saving</div>
+
+      {/* ── Login Credentials (admin / support_admin / teacher only) ── */}
+      {canEditCreds&&(
+        <div className="mb-5 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <KeyRound size={13} className="text-amber-400"/>
+            <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">Login Credentials</span>
+          </div>
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs text-white/40 uppercase tracking-wider block mb-1">Email Address <span className="text-white/20 normal-case">(optional — used instead of roll no to login)</span></label>
+              <input
+                type="email" value={sEmail} onChange={e=>{setSEmail(e.target.value);setCredMsg("");}}
+                placeholder="student@email.com"
+                className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-lg px-3 py-2 outline-none focus:border-amber-500/50"/>
+            </div>
+            <div>
+              <label className="text-xs text-white/40 uppercase tracking-wider block mb-1">Password <span className="text-white/20 normal-case">(min. 6 characters)</span></label>
+              <div className="relative">
+                <input
+                  type={showPass?"text":"password"} value={sPass} onChange={e=>{setSPass(e.target.value);setCredMsg("");}}
+                  placeholder="New password"
+                  className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-lg px-3 py-2 pr-10 outline-none focus:border-amber-500/50"/>
+                <button type="button" onClick={()=>setShowPass(p=>!p)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60 transition-colors">
+                  {showPass?<EyeOff size={14}/>:<Eye size={14}/>}
+                </button>
+              </div>
+            </div>
+          </div>
+          {credMsg&&<p className="text-xs text-red-400 mt-2">{credMsg}</p>}
+          <p className="text-[11px] text-white/25 mt-2 leading-relaxed">
+            Student can log in with <span className="text-white/40 font-mono">Roll No</span>
+            {sEmail.trim()&&<> or <span className="text-white/40 font-mono">{sEmail.trim()}</span></>}
+            {" "}+ password after saving.
+          </p>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-3">
         {([["Date of Birth","dob","date"],["Gender","gender","text"],["Phone","phone","tel"],["Blood Group","bloodGroup","text"],["NIC","nic","text"],["Parent Name","parentName","text"],["Parent Phone","parentPhone","tel"],["Address","address","text"]] as [string,keyof typeof form,string][]).map(([label,key,type])=>(
           <div key={key} className={key==="address"?"col-span-2":""}>
@@ -1384,8 +1444,8 @@ function LoginScreen({state,db,onLogin,onRegister,onBack}:{state:AppState;db:DbO
         if(liveStatus==="pending"){ setError("Your account is pending admin approval."); }
         else { onLogin({role:"teacher",id:t.id,name:t.name}); }
       } else {
-        const s=state.students.find(s=>s.rollNo===id&&s.password===pass);
-        if(!s){ setError("Invalid roll number or password"); return; }
+        const s=state.students.find(s=>(s.rollNo===id||s.email===id)&&s.password===pass);
+        if(!s){ setError("Invalid roll number / email or password"); return; }
         // fetch live status from DB if available
         let liveStatus = s.status;
         if(sb.isConfigured()){
@@ -1400,7 +1460,7 @@ function LoginScreen({state,db,onLogin,onRegister,onBack}:{state:AppState;db:DbO
     }
   }
 
-  const placeholders:Record<Role,string>={admin:"Username",support_admin:"Email address",teacher:"Email address",student:"Roll Number (e.g. 0001)"};
+  const placeholders:Record<Role,string>={admin:"Username",support_admin:"Email address",teacher:"Email address",student:"Roll Number or Email"};
 
   return(
     <div className="min-h-screen bg-[#05080F] flex items-center justify-center p-4 font-mono">
@@ -1426,7 +1486,7 @@ function LoginScreen({state,db,onLogin,onRegister,onBack}:{state:AppState;db:DbO
         </div>
         <div className="bg-[#080D18] border border-white/5 rounded-2xl p-6 space-y-4">
           <div>
-            <label className="text-xs text-white/40 uppercase tracking-wider block mb-2">{role==="admin"?"Username":role==="student"?"Roll Number":"Email"}</label>
+            <label className="text-xs text-white/40 uppercase tracking-wider block mb-2">{role==="admin"?"Username":role==="student"?"Roll Number or Email":"Email"}</label>
             <div className="relative">
               <User size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30"/>
               <input value={id} onChange={e=>{setId(e.target.value);setError("");}} onKeyDown={e=>e.key==="Enter"&&handleLogin()} placeholder={placeholders[role]}
@@ -3059,7 +3119,7 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
     <Layout user={user} state={state} navItems={NAV} activeTab={tab} setTab={setTab} onLogout={onLogout} onBackToSite={onBackToSite}>
       {renderTab()}
       {popup&&<div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={e=>e.target===e.currentTarget&&setPopup(null)}>{renderPopup()}</div>}
-      {editSt&&<ScrollLockModal onClose={()=>setEditSt(null)}><StudentProfileModal student={editSt} state={state} onSave={u=>db.updateStudent(u)} onClose={()=>setEditSt(null)}/></ScrollLockModal>}
+      {editSt&&<ScrollLockModal onClose={()=>setEditSt(null)}><StudentProfileModal student={editSt} state={state} userRole={user.role} onSave={u=>db.updateStudent(u)} onClose={()=>setEditSt(null)}/></ScrollLockModal>}
       {editTch&&<ScrollLockModal onClose={()=>setEditTch(null)}><TeacherProfileModal teacher={editTch} state={state} onSave={u=>db.updateTeacher(u)} onClose={()=>setEditTch(null)} isAdmin/></ScrollLockModal>}
     </Layout>
   );
@@ -4161,12 +4221,196 @@ function TeacherView({user,state,setState,onLogout,onBackToSite,db}:
   return(
     <Layout user={user} state={state} navItems={NAV} activeTab={tab} setTab={t=>{setTab(t);setScanFeedback(null);}} onLogout={onLogout} onBackToSite={onBackToSite}>
       {renderTab()}
-      {editSt&&<ScrollLockModal onClose={()=>setEditSt(null)}><StudentProfileModal student={editSt} state={state} onSave={u=>{setState(s=>({...s,students:s.students.map(x=>x.id===u.id?u:x)}));try{sb.update("students",u.id,{name:u.name,roll_no:u.rollNo,class_id:u.classId,photo:u.photo??null,profile:u.profile??null});}catch{}}} onClose={()=>setEditSt(null)}/></ScrollLockModal>}
+      {editSt&&<ScrollLockModal onClose={()=>setEditSt(null)}><StudentProfileModal student={editSt} state={state} userRole={user.role} onSave={u=>{setState(s=>({...s,students:s.students.map(x=>x.id===u.id?u:x)}));try{sb.update("students",u.id,{name:u.name,roll_no:u.rollNo,class_id:u.classId,photo:u.photo??null,profile:u.profile??null,password:u.password,email:u.email??null});}catch{}}} onClose={()=>setEditSt(null)}/></ScrollLockModal>}
       {editSelf&&<ScrollLockModal onClose={()=>setEditSelf(false)}><TeacherProfileModal teacher={teacher} state={state} onSave={u=>{setState(s=>({...s,teachers:s.teachers.map(x=>x.id===u.id?u:x)}));try{sb.update("teachers",u.id,{name:u.name,email:u.email,photo:u.photo??null,profile:u.profile??null});}catch{}}} onClose={()=>setEditSelf(false)}/></ScrollLockModal>}
       {tvPopup&&<div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={e=>e.target===e.currentTarget&&setTVPopup(null)}>{renderTVPopup()}</div>}
     </Layout>
   );
 }
+// ─── Student Results Component ────────────────────────────────────────────────
+function StudentResults({student,state,myClass,mySubjects,myRank,classStudents}:{
+  student:Student; state:AppState; myClass:any; mySubjects:Subject[];
+  myRank:number; classStudents:Student[];
+}) {
+  const exams = state.exams || [];
+  const [mode,   setMode]   = React.useState<"term"|"exam">("term");
+  const [term,   setTerm]   = React.useState("Term 1");
+  const [examId, setExamId] = React.useState(exams[0]?.id||"");
+
+  // Build marks for the selected source
+  const marksMap: Record<string,number|undefined> = React.useMemo(()=>{
+    if (mode==="exam") {
+      const recs = (state.examRecords||[]).filter(r=>r.examId===examId && r.studentId===student.id);
+      const m: Record<string,number|undefined> = {};
+      recs.forEach(r=>{ m[r.subjectId]=r.marks; });
+      return m;
+    }
+    // term mode — use student.marks (keyed by subjectId)
+    return student.marks as Record<string,number|undefined>;
+  },[mode, examId, student, state.examRecords]);
+
+  const validMarks = mySubjects.map(s=>marksMap[s.id]).filter(m=>m!==undefined) as number[];
+  const total      = validMarks.reduce((a,b)=>a+b,0);
+  const avg        = validMarks.length ? Math.round((total/validMarks.length)*10)/10 : 0;
+  const grade      = getGrade(avg);
+
+  // Rank among classmates for this specific exam/term
+  const myRankForSource = React.useMemo(()=>{
+    if (mode==="term") return myRank;
+    const ranked = classStudents.map(st=>{
+      const recs=(state.examRecords||[]).filter(r=>r.examId===examId&&r.studentId===st.id);
+      const t=recs.reduce((a,r)=>a+(r.marks||0),0);
+      return {id:st.id, total:t};
+    }).sort((a,b)=>b.total-a.total);
+    return ranked.findIndex(r=>r.id===student.id)+1;
+  },[mode, examId, classStudents, student, state.examRecords, myRank]);
+
+  const selectedExamName = exams.find(e=>e.id===examId)?.name || "";
+  const resultLabel      = mode==="exam" ? selectedExamName : term;
+
+  return(
+    <div className="space-y-4 max-w-xl">
+
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <h2 className="text-xl font-bold text-white">My Results</h2>
+        <button onClick={()=>downloadResultPDF(student,state)}
+          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-2 rounded-lg transition-colors shadow-lg shadow-blue-500/20">
+          <Download size={14}/>Download PDF
+        </button>
+      </div>
+
+      {/* Mode + selector bar */}
+      <div className="bg-[#080D18] border border-white/8 rounded-2xl p-4 space-y-3">
+        {/* Term / Exam toggle */}
+        <div className="flex gap-2">
+          <div className="flex bg-white/5 rounded-xl p-1 gap-1">
+            {(["term","exam"] as const).map(m=>(
+              <button key={m} onClick={()=>setMode(m)}
+                className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${mode===m?"bg-blue-600 text-white shadow":"text-white/40 hover:text-white/70"}`}>
+                {m==="term"?"📅 Term Test":"📝 Exam"}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Term buttons OR exam dropdown */}
+        {mode==="term" ? (
+          <div className="flex gap-2 flex-wrap">
+            {["Term 1","Term 2","Term 3","Annual"].map(t=>(
+              <button key={t} onClick={()=>setTerm(t)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${term===t?"bg-blue-600 border-blue-500 text-white":"border-white/10 text-white/40 hover:text-white/70 hover:border-white/20"}`}>
+                {t}
+              </button>
+            ))}
+          </div>
+        ):(
+          <div className="flex items-center gap-3 flex-wrap">
+            {exams.length===0 ? (
+              <span className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 px-3 py-1.5 rounded-lg">
+                ⚠ No exams created yet
+              </span>
+            ):(
+              <select value={examId} onChange={e=>setExamId(e.target.value)}
+                className="bg-[#0d1829] border border-white/10 text-white text-sm rounded-xl px-3 py-2 outline-none focus:border-blue-500/50 min-w-[200px]">
+                {exams.map(ex=>(
+                  <option key={ex.id} value={ex.id}>{ex.name} ({ex.year})</option>
+                ))}
+              </select>
+            )}
+            {examId&&selectedExamName&&(
+              <span className="text-xs text-purple-400 bg-purple-500/10 border border-purple-500/20 px-3 py-1.5 rounded-lg font-medium">
+                {selectedExamName}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Result card */}
+      <div className="bg-[#080D18] border border-white/5 rounded-2xl p-6">
+        <div className="text-center mb-5 pb-5 border-b border-white/5">
+          <div className="text-white font-bold text-lg">{state.settings.name}</div>
+          <div className="text-white/30 text-xs">{state.settings.tagline}</div>
+          <div className="text-white/20 text-xs mt-1">{resultLabel} — Result Card</div>
+        </div>
+        <div className="grid grid-cols-2 gap-3 mb-5 text-xs">
+          <div className="bg-white/3 rounded-lg p-3"><span className="text-white/40">Name</span><div className="text-white mt-0.5">{student.name}</div></div>
+          <div className="bg-white/3 rounded-lg p-3"><span className="text-white/40">Roll No</span><div className="text-white font-mono mt-0.5">{student.rollNo}</div></div>
+          <div className="bg-white/3 rounded-lg p-3"><span className="text-white/40">Class</span><div className="text-white mt-0.5">{myClass?.name}-{myClass?.section}</div></div>
+          <div className="bg-white/3 rounded-lg p-3"><span className="text-white/40">Rank</span><div className="text-yellow-400 font-bold mt-0.5">#{myRankForSource||"—"}</div></div>
+        </div>
+
+        {/* No data state for exam mode */}
+        {mode==="exam" && validMarks.length===0 && examId ? (
+          <div className="text-center py-10 text-white/20 space-y-2">
+            <div className="text-3xl">📭</div>
+            <p className="text-sm">No results recorded for this exam yet.</p>
+          </div>
+        ):(
+          <>
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-white/5">
+                  <th className="text-left text-xs text-white/40 uppercase px-2 py-2">Subject</th>
+                  <th className="text-center text-xs text-white/40 uppercase px-2 py-2">Marks</th>
+                  <th className="text-center text-xs text-white/40 uppercase px-2 py-2">Grade</th>
+                </tr>
+              </thead>
+              <tbody>
+                {mySubjects.map(sub=>{
+                  const m = marksMap[sub.id];
+                  const g = getGrade(m??0);
+                  return(
+                    <tr key={sub.id} className="border-b border-white/5">
+                      <td className="px-2 py-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-mono text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded">{sub.code}</span>
+                          <span className="text-sm text-white">{sub.name}</span>
+                        </div>
+                      </td>
+                      <td className="px-2 py-3 text-center">
+                        <span className={`font-mono text-sm font-bold ${m===undefined?"text-white/20":m>=75?"text-emerald-400":m>=40?"text-yellow-400":"text-red-400"}`}>
+                          {m??'–'}<span className="text-white/20 font-normal">/100</span>
+                        </span>
+                      </td>
+                      <td className="px-2 py-3 text-center">
+                        <span className={`text-sm font-bold font-mono px-2 py-0.5 rounded border ${gradeBg(m!==undefined?g:"-")} ${gradeColor(m!==undefined?g:"-")}`}>
+                          {m!==undefined?g:"–"}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-white/10">
+                  <td className="px-2 py-3 text-sm font-bold text-white">Total</td>
+                  <td className="px-2 py-3 text-center font-mono font-bold text-white">{total}/{validMarks.length*100}</td>
+                  <td className="px-2 py-3 text-center"><span className={`text-lg font-bold font-mono ${gradeColor(grade)}`}>{grade}</span></td>
+                </tr>
+                <tr><td className="px-2 py-2 text-xs text-white/40">Average</td><td className="px-2 py-2 text-center font-mono text-sm text-white/60">{avg}%</td><td/></tr>
+                <tr><td className="px-2 py-2 text-xs text-white/40">GPA</td>
+                  <td className="px-2 py-2 text-center">
+                    <span className={`font-mono font-bold text-sm ${gpaColor(calcGPA(avg))}`}>{calcGPA(avg).toFixed(1)}</span>
+                    <span className="text-white/20 text-xs"> / 4.0</span>
+                  </td><td/>
+                </tr>
+              </tfoot>
+            </table>
+            <GradeKey />
+          </>
+        )}
+      </div>
+
+      <div className="flex items-center gap-2 bg-blue-500/5 border border-blue-500/10 rounded-xl px-4 py-3">
+        <FileText size={14} className="text-blue-400 flex-shrink-0"/>
+        <span className="text-xs text-white/40">Click <span className="text-blue-400 font-medium">Download PDF</span> above, then choose <span className="text-white/60">"Save as PDF"</span> in the print dialog.</span>
+      </div>
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 function StudentView({user,state,setState,onLogout,onBackToSite}:
   {user:LoggedInUser;state:AppState;setState:(fn:(s:AppState)=>AppState)=>void;onLogout:()=>void;onBackToSite?:()=>void}) {
@@ -4196,16 +4440,47 @@ function StudentView({user,state,setState,onLogout,onBackToSite}:
     {id:"attendance", label:"Attendance", icon:CheckCircle},
   ];
 
-  const validMarks     = mySubjects.map(s=>student.marks[s.id]).filter(m=>m!==undefined) as number[];
+  // ── Auto-detect latest exam that has records for this student ──────────────
+  const classStudents  = state.students.filter(s=>s.classId===student.classId);
+  const exams          = state.exams || [];
+  const examRecords    = state.examRecords || [];
+
+  // Find the most recently created exam that has at least one record for this student
+  const latestExamWithResults = [...exams]
+    .reverse() // most recent first (exams are appended, so last = newest)
+    .find(ex => examRecords.some(r => r.examId===ex.id && r.studentId===student.id));
+
+  // Build dashMarks: from latest exam if available, else fall back to student.marks
+  const dashMarks: Record<string,number|undefined> = latestExamWithResults
+    ? (() => {
+        const m: Record<string,number|undefined> = {};
+        examRecords
+          .filter(r=>r.examId===latestExamWithResults.id && r.studentId===student.id)
+          .forEach(r=>{ m[r.subjectId]=r.marks; });
+        return m;
+      })()
+    : student.marks as Record<string,number|undefined>;
+
+  const dashSource = latestExamWithResults
+    ? `${latestExamWithResults.name} (${latestExamWithResults.year})`
+    : null; // null = using term marks
+
+  const validMarks     = mySubjects.map(s=>dashMarks[s.id]).filter(m=>m!==undefined) as number[];
   const total          = validMarks.reduce((a,b)=>a+b,0);
   const avg            = validMarks.length?Math.round((total/validMarks.length)*10)/10:0;
   const grade          = getGrade(avg);
   const attendanceDays = Object.keys(state.attendance);
   const presentDays    = attendanceDays.filter(d=>state.attendance[d]?.[student.rollNo]).length;
   const pct            = attendanceDays.length?Math.round((presentDays/attendanceDays.length)*100):0;
-  const classStudents  = state.students.filter(s=>s.classId===student.classId);
-  const ranked         = classStudents.map(st=>{const v=mySubjects.map(s=>st.marks[s.id]).filter(m=>m!==undefined) as number[];return{id:st.id,total:v.reduce((a,b)=>a+b,0)};}).sort((a,b)=>b.total-a.total);
-  const myRank         = ranked.findIndex(r=>r.id===student.id)+1;
+
+  // Rank using same source
+  const ranked = classStudents.map(st=>{
+    const marks = latestExamWithResults
+      ? examRecords.filter(r=>r.examId===latestExamWithResults.id&&r.studentId===st.id).reduce((a,r)=>a+(r.marks||0),0)
+      : mySubjects.map(s=>(st.marks[s.id]||0)).reduce((a,b)=>a+b,0);
+    return {id:st.id, total:marks};
+  }).sort((a,b)=>b.total-a.total);
+  const myRank = ranked.findIndex(r=>r.id===student.id)+1;
 
   function renderTab(){
     switch(tab){
@@ -4223,85 +4498,44 @@ function StudentView({user,state,setState,onLogout,onBackToSite}:
               <button onClick={()=>setEditSelf(true)} className="flex items-center gap-1.5 text-xs border border-white/10 text-white/40 hover:text-blue-400 hover:border-blue-500/30 px-3 py-1.5 rounded-lg transition-colors flex-shrink-0"><Edit2 size={12}/>Edit</button>
             </div>
           </div>
+
+          {/* Source label — auto-updates when exam results are released */}
+          <div className="flex items-center gap-2">
+            <div className="h-px flex-1 bg-white/5"/>
+            {dashSource
+              ? <span className="text-[11px] text-purple-400 bg-purple-500/10 border border-purple-500/20 px-3 py-1 rounded-full font-medium whitespace-nowrap">📝 {dashSource}</span>
+              : <span className="text-[11px] text-white/20 bg-white/5 border border-white/8 px-3 py-1 rounded-full whitespace-nowrap">📅 Term Marks</span>
+            }
+            <div className="h-px flex-1 bg-white/5"/>
+          </div>
+
           <div className="grid grid-cols-2 gap-4">
-            <div className="bg-[#080D18] border border-white/5 rounded-xl p-5 text-center"><div className={`text-4xl font-bold mb-1 ${gradeColor(grade)}`}>{grade}</div><div className="text-xs text-white/40">Overall Grade</div><div className="text-lg font-bold text-white mt-1">{avg}%</div></div>
-            <div className="bg-[#080D18] border border-white/5 rounded-xl p-5 text-center"><div className="text-4xl font-bold text-yellow-400 mb-1">#{myRank}</div><div className="text-xs text-white/40">Class Rank</div><div className="text-sm text-white/40 mt-1">of {classStudents.length}</div></div>
-            <div className="bg-[#080D18] border border-white/5 rounded-xl p-5 text-center"><div className="text-4xl font-bold text-white mb-1">{total}</div><div className="text-xs text-white/40">Total Marks</div><div className="text-sm text-white/40 mt-1">out of {validMarks.length*100}</div></div>
-            <div className={`border rounded-xl p-5 text-center ${pct>=75?"bg-emerald-500/10 border-emerald-500/20":"bg-red-500/10 border-red-500/20"}`}><div className={`text-4xl font-bold mb-1 ${pct>=75?"text-emerald-400":"text-red-400"}`}>{pct}%</div><div className="text-xs text-white/40">Attendance</div><div className="text-sm text-white/40 mt-1">{presentDays}/{attendanceDays.length} days</div></div>
-          </div>
-          <div className="bg-[#080D18] border border-white/5 rounded-xl p-5">
-            <h3 className="text-xs font-semibold text-white/50 uppercase tracking-widest mb-4">Subject Performance</h3>
-            <div className="space-y-3">
-              {mySubjects.map(sub=>{
-                const m=student.marks[sub.id];
-                return(
-                  <div key={sub.id}>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <div className="flex items-center gap-2"><span className="text-xs font-mono text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded">{sub.code}</span><span className="text-sm text-white">{sub.name}</span></div>
-                      <span className={`font-mono text-sm font-bold ${m===undefined?"text-white/30":m>=75?"text-emerald-400":m>=40?"text-yellow-400":"text-red-400"}`}>{m??'–'}<span className="text-white/30 font-normal">/100</span></span>
-                    </div>
-                    <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
-                      <div className={`h-full rounded-full ${m===undefined?"w-0":m>=75?"bg-emerald-400":m>=40?"bg-yellow-400":"bg-red-400"}`} style={{width:`${m??0}%`}}/>
-                    </div>
-                  </div>
-                );
-              })}
+            <div className="bg-[#080D18] border border-white/5 rounded-xl p-5 text-center">
+              <div className={`text-4xl font-bold mb-1 ${gradeColor(grade)}`}>{validMarks.length?grade:"—"}</div>
+              <div className="text-xs text-white/40">Overall Grade</div>
+              <div className="text-lg font-bold text-white mt-1">{validMarks.length?`${avg}%`:"—"}</div>
+            </div>
+            <div className="bg-[#080D18] border border-white/5 rounded-xl p-5 text-center">
+              <div className="text-4xl font-bold text-yellow-400 mb-1">{validMarks.length?`#${myRank}`:"—"}</div>
+              <div className="text-xs text-white/40">Class Rank</div>
+              <div className="text-sm text-white/40 mt-1">of {classStudents.length}</div>
+            </div>
+            <div className="bg-[#080D18] border border-white/5 rounded-xl p-5 text-center">
+              <div className="text-4xl font-bold text-white mb-1">{validMarks.length?total:"—"}</div>
+              <div className="text-xs text-white/40">Total Marks</div>
+              <div className="text-sm text-white/40 mt-1">{validMarks.length?`out of ${validMarks.length*100}`:"No results yet"}</div>
+            </div>
+            <div className={`border rounded-xl p-5 text-center ${pct>=75?"bg-emerald-500/10 border-emerald-500/20":"bg-red-500/10 border-red-500/20"}`}>
+              <div className={`text-4xl font-bold mb-1 ${pct>=75?"text-emerald-400":"text-red-400"}`}>{pct}%</div>
+              <div className="text-xs text-white/40">Attendance</div>
+              <div className="text-sm text-white/40 mt-1">{presentDays}/{attendanceDays.length} days</div>
             </div>
           </div>
         </div>
       );
 
-      // ✅ My Results — with Download PDF button
-      case "marks": return(
-        <div className="space-y-4 max-w-xl">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-bold text-white">My Results</h2>
-            <button onClick={()=>downloadResultPDF(student,state)}
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-2 rounded-lg transition-colors shadow-lg shadow-blue-500/20">
-              <Download size={14}/>Download PDF
-            </button>
-          </div>
-
-          <div className="bg-[#080D18] border border-white/5 rounded-2xl p-6">
-            <div className="text-center mb-5 pb-5 border-b border-white/5">
-              <div className="text-white font-bold text-lg">{state.settings.name}</div>
-              <div className="text-white/30 text-xs">{state.settings.tagline}</div>
-              <div className="text-white/20 text-xs mt-1">Progress Report Card</div>
-            </div>
-            <div className="grid grid-cols-2 gap-3 mb-5 text-xs">
-              <div className="bg-white/3 rounded-lg p-3"><span className="text-white/40">Name</span><div className="text-white mt-0.5">{student.name}</div></div>
-              <div className="bg-white/3 rounded-lg p-3"><span className="text-white/40">Roll No</span><div className="text-white font-mono mt-0.5">{student.rollNo}</div></div>
-              <div className="bg-white/3 rounded-lg p-3"><span className="text-white/40">Class</span><div className="text-white mt-0.5">{myClass?.name}-{myClass?.section}</div></div>
-              <div className="bg-white/3 rounded-lg p-3"><span className="text-white/40">Rank</span><div className="text-yellow-400 font-bold mt-0.5">#{myRank}</div></div>
-            </div>
-            <table className="w-full">
-              <thead><tr className="border-b border-white/5"><th className="text-left text-xs text-white/40 uppercase px-2 py-2">Subject</th><th className="text-center text-xs text-white/40 uppercase px-2 py-2">Marks</th><th className="text-center text-xs text-white/40 uppercase px-2 py-2">Grade</th></tr></thead>
-              <tbody>{mySubjects.map(sub=>{
-                const m=student.marks[sub.id];
-                const g=getGrade(m??0);
-                return(
-                  <tr key={sub.id} className="border-b border-white/5">
-                    <td className="px-2 py-3"><div className="flex items-center gap-2"><span className="text-xs font-mono text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded">{sub.code}</span><span className="text-sm text-white">{sub.name}</span></div></td>
-                    <td className="px-2 py-3 text-center"><span className={`font-mono text-sm font-bold ${m===undefined?"text-white/20":m>=75?"text-emerald-400":m>=40?"text-yellow-400":"text-red-400"}`}>{m??'–'}<span className="text-white/20 font-normal">/100</span></span></td>
-                    <td className="px-2 py-3 text-center"><span className={`text-sm font-bold font-mono px-2 py-0.5 rounded border ${gradeBg(m!==undefined?g:"-")} ${gradeColor(m!==undefined?g:"-")}`}>{m!==undefined?g:"–"}</span></td>
-                  </tr>
-                );
-              })}</tbody>
-              <tfoot>
-                <tr className="border-t-2 border-white/10"><td className="px-2 py-3 text-sm font-bold text-white">Total</td><td className="px-2 py-3 text-center font-mono font-bold text-white">{total}/{validMarks.length*100}</td><td className="px-2 py-3 text-center"><span className={`text-lg font-bold font-mono ${gradeColor(grade)}`}>{grade}</span></td></tr>
-                <tr><td className="px-2 py-2 text-xs text-white/40">Average</td><td className="px-2 py-2 text-center font-mono text-sm text-white/60">{avg}%</td><td/></tr>
-                <tr><td className="px-2 py-2 text-xs text-white/40">GPA</td><td className="px-2 py-2 text-center"><span className={`font-mono font-bold text-sm ${gpaColor(calcGPA(avg))}`}>{calcGPA(avg).toFixed(1)}</span><span className="text-white/20 text-xs"> / 4.0</span></td><td/></tr>
-              </tfoot>
-            </table>
-            <GradeKey />
-          </div>
-
-          <div className="flex items-center gap-2 bg-blue-500/5 border border-blue-500/10 rounded-xl px-4 py-3">
-            <FileText size={14} className="text-blue-400 flex-shrink-0"/>
-            <span className="text-xs text-white/40">Click <span className="text-blue-400 font-medium">Download PDF</span> above, then choose <span className="text-white/60">"Save as PDF"</span> in the print dialog.</span>
-          </div>
-        </div>
-      );
+      // ✅ My Results — exam / term selector
+      case "marks": return <StudentResults student={student} state={state} myClass={myClass} mySubjects={mySubjects} myRank={myRank} classStudents={classStudents}/>;
 
       case "timetable": return(
         <div className="space-y-4">
@@ -7617,7 +7851,8 @@ export default function SchoolERP() {
       update(st => ({ ...st, students: st.students.map(x => x.id === s.id ? s : x) }));
       try { await sb.update("students", s.id, {
         name: s.name, roll_no: s.rollNo, class_id: s.classId,
-        photo: s.photo, marks: s.marks, password: s.password, profile: s.profile ?? null,
+        photo: s.photo, marks: s.marks, password: s.password,
+        email: s.email ?? null, profile: s.profile ?? null,
       }); } catch(e) { console.warn("[db.updateStudent]", e); }
     },
     async deleteStudent(id) {
