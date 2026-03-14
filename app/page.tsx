@@ -220,7 +220,7 @@ interface TeacherProfile { dob?:string; gender?:string; address?:string; phone?:
 // PHASE 1: Subject categories
 type SubjectCategory = "Arts" | "Science" | "Commerce" | "General";
 
-interface Student { id:string; name:string; rollNo:string; classId:string; photo:string; marks:Record<string,number>; password:string; email?:string; profile?:StudentProfile; status?:"pending"|"approved"; }
+interface Student { id:string; name:string; rollNo:string; classId:string; photo:string; marks:Record<string,number>; password:string; email?:string; profile?:StudentProfile; status?:"pending"|"approved"; csvOrder?:number; }
 // PHASE 2: is_counselor, is_bursar roles on Teacher
 interface Teacher { id:string; name:string; email:string; subjectIds:string[]; classIds:string[]; password:string; photo?:string; profile?:TeacherProfile; status?:"pending"|"approved"; is_counselor?:boolean; is_bursar?:boolean; }
 // PHASE 1: category on Subject
@@ -520,12 +520,17 @@ function sortClasses<T extends{name:string;section:string}>(arr:T[]):T[]{
     return a.name.localeCompare(b.name)||a.section.localeCompare(b.section);
   });
 }
-// Keep students in CSV upload order within each class (no roll number sort)
+// Sort students: by class order first, then by CSV upload order within each class
 function sortStudents(students:Student[],classes:Class[]):Student[]{
   const sorted=sortClasses(classes);
   const order=Object.fromEntries(sorted.map((c,i)=>[c.id,i]));
   return [...students].sort((a,b)=>{
-    return (order[a.classId]??99)-(order[b.classId]??99);
+    const co=(order[a.classId]??99)-(order[b.classId]??99);
+    if(co!==0) return co;
+    // Within same class: sort by csvOrder if available, else keep insertion order
+    const oa=a.csvOrder??999999;
+    const ob=b.csvOrder??999999;
+    return oa-ob;
   });
 }
 
@@ -2303,10 +2308,12 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
 
   async function importStudentsCSV(text:string){
     const rows=parseCSV(text);
-    const ns:Student[]=rows.map(r=>{
+    // Use the max existing csvOrder as base so new imports append after existing
+    const maxOrder=Math.max(0,...state.students.map(s=>s.csvOrder??0));
+    const ns:Student[]=rows.map((r,i)=>{
       if(!r.name||!r.rollno) return null;
       const cid=state.classes.find(c=>c.name===r.class&&c.section===r.section)?.id||state.classes[0]?.id||"";
-      return{id:uid(),name:r.name,rollNo:r.rollno,classId:cid,
+      return{id:uid(),name:r.name,rollNo:r.rollno,classId:cid,csvOrder:maxOrder+i+1,
         photo:`https://api.dicebear.com/7.x/avataaars/svg?seed=${r.name}`,marks:{},password:r.password||"changeme",
         profile:encProfile({dob:r.dob||"",gender:r.gender||"",phone:r.phone||"",address:r.address||"",parentName:r.parent_name||"",parentPhone:r.parent_phone||"",bloodGroup:r.blood_group||"",nic:""})} as Student;
     }).filter(Boolean) as Student[];
@@ -8126,6 +8133,7 @@ export default function SchoolERP() {
       photo: r.photo || `https://api.dicebear.com/7.x/avataaars/svg?seed=${r.name}`,
       marks: r.marks || {}, password: r.password || "changeme",
       status: r.status || undefined,
+      csvOrder: r.csv_order ?? undefined,
       profile };
   }
   function dbToTeacher(r: any): Teacher {
@@ -8174,6 +8182,7 @@ export default function SchoolERP() {
       try { await sb.upsert("students", {
         id: s.id, name: s.name, roll_no: s.rollNo, class_id: s.classId,
         photo: s.photo, marks: s.marks, password: s.password, profile: s.profile ?? null,
+        csv_order: s.csvOrder ?? null,
       }); } catch(e) { console.warn("[db.addStudent]", e); }
     },
     async updateStudent(s) {
