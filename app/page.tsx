@@ -1247,7 +1247,7 @@ function TeacherProfileModal({teacher,state,onSave,onClose,isAdmin=false}:{teach
 }
 
 // ─── Subject Performance Bar Chart (no external lib) ─────────────────────────
-function SubjectChart({state,classId}:{state:AppState;classId:string}) {
+function SubjectChart({state,classId,examId}:{state:AppState;classId:string;examId?:string}) {
   const subjects = state.subjects.filter(s=>s.classIds.includes(classId));
   const students = state.students.filter(s=>s.classId===classId);
   const COLORS   = ["#3b82f6","#8b5cf6","#10b981","#f59e0b","#ef4444","#06b6d4"];
@@ -1255,8 +1255,16 @@ function SubjectChart({state,classId}:{state:AppState;classId:string}) {
   if(!subjects.length||!students.length)
     return<div className="text-center text-white/20 text-sm py-10">No data</div>;
 
+  const getMark=(studentId:string,subjectId:string)=>{
+    if(examId) return state.examRecords.find(r=>r.examId===examId&&r.studentId===studentId&&r.subjectId===subjectId)?.marks;
+    return students.find(s=>s.id===studentId)?.marks[subjectId];
+  };
+
+  if(examId&&!state.examRecords.some(r=>r.examId===examId&&students.some(s=>s.id===r.studentId)))
+    return<div className="text-center text-white/20 text-sm py-10">No marks recorded for this exam in this class</div>;
+
   const data = subjects.map((sub,i)=>{
-    const marks=students.map(st=>st.marks[sub.id]).filter(m=>m!==undefined) as number[];
+    const marks=students.map(st=>getMark(st.id,sub.id)).filter(m=>m!==undefined) as number[];
     const avg=marks.length?Math.round(marks.reduce((a,b)=>a+b,0)/marks.length):0;
     return{label:sub.code,name:sub.name,avg,color:COLORS[i%COLORS.length]};
   });
@@ -1301,7 +1309,7 @@ function SubjectChart({state,classId}:{state:AppState;classId:string}) {
             </div>
             <div className="flex gap-1">
               {subjects.map((sub,i)=>{
-                const m=st.marks[sub.id];
+                const m=getMark(st.id,sub.id);
                 return(
                   <div key={sub.id} className="flex-1 relative group">
                     <div className="h-2 bg-white/5 rounded-full overflow-hidden">
@@ -2139,11 +2147,16 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
   const [ss,setSS]             = useState(state.subjects[0]?.id||"");
   const [me,setME]             = useState<Record<string,string>>({});
   const [dashCls,setDashCls]   = useState(state.classes[0]?.id||"");
+  const [dashExam,setDashExam] = useState<string>("__term__");
   const [adminSearch,setAS]    = useState("");
   const [adminClassF,setACF]   = useState("all");
   const [csvMsg,setCsvMsg]     = useState("");
   const [editSt,setEditSt]     = useState<Student|null>(null);
   const [editTch,setEditTch]   = useState<Teacher|null>(null);
+  const [selStudents,setSelStudents] = useState<Set<string>>(new Set());
+  const [selTeachers,setSelTeachers] = useState<Set<string>>(new Set());
+  const [selSubjects,setSelSubjects] = useState<Set<string>>(new Set());
+  const [selClasses,setSelClasses]   = useState<Set<string>>(new Set());
   const upd = setState;
 
   const pendingCount = state.students.filter(s=>s.status==="pending").length
@@ -2439,17 +2452,27 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
 
           {/* ✅ Subject-wise Performance Chart */}
           <div className="bg-[#080D18] border border-white/5 rounded-xl p-5">
-            <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
               <div>
                 <h3 className="text-sm font-semibold text-white">Subject-wise Performance</h3>
                 <p className="text-xs text-white/30 mt-0.5">Average marks per subject — hover bars for details</p>
               </div>
-              <select value={dashCls} onChange={e=>setDashCls(e.target.value)}
-                className="bg-white/5 border border-white/10 text-white text-xs rounded-lg px-3 py-1.5 outline-none focus:border-blue-500/50">
-                {state.classes.map(c=><option key={c.id} value={c.id}>Class {c.name}-{c.section}</option>)}
-              </select>
+              <div className="flex items-center gap-2 flex-wrap">
+                <select value={dashExam} onChange={e=>setDashExam(e.target.value)}
+                  className="bg-white/5 border border-white/10 text-white text-xs rounded-lg px-3 py-1.5 outline-none focus:border-blue-500/50">
+                  <option value="__term__">📅 Term Marks</option>
+                  {state.exams.length>0&&<option disabled>── Exams ──</option>}
+                  {[...state.exams].sort((a,b)=>b.year-a.year).map(ex=>(
+                    <option key={ex.id} value={ex.id}>📝 {ex.name} ({ex.year})</option>
+                  ))}
+                </select>
+                <select value={dashCls} onChange={e=>setDashCls(e.target.value)}
+                  className="bg-white/5 border border-white/10 text-white text-xs rounded-lg px-3 py-1.5 outline-none focus:border-blue-500/50">
+                  {state.classes.map(c=><option key={c.id} value={c.id}>Class {c.name}-{c.section}</option>)}
+                </select>
+              </div>
             </div>
-            <SubjectChart state={state} classId={dashCls}/>
+            <SubjectChart state={state} classId={dashCls} examId={dashExam==="__term__"?undefined:dashExam}/>
           </div>
 
           {/* Today attendance summary */}
@@ -2558,15 +2581,62 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
             <h2 className="text-xl font-bold text-white">Class Management</h2>
             {!isSA&&<button onClick={()=>setPopup({type:"addClass"})} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-2 rounded-lg transition-colors"><Plus size={14}/>Add Class</button>}
           </div>
+          {/* Class bulk actions */}
+          {(()=>{
+            const visible=state.classes;
+            const allChecked=visible.length>0&&visible.every(c=>selClasses.has(c.id));
+            const anyChecked=selClasses.size>0;
+            return(
+              <div className="flex items-center gap-3 flex-wrap">
+                <label className="flex items-center gap-2 cursor-pointer select-none text-xs text-white/50 hover:text-white/70">
+                  <input type="checkbox" checked={allChecked} onChange={e=>{
+                    if(e.target.checked) setSelClasses(new Set(visible.map(c=>c.id)));
+                    else setSelClasses(new Set());
+                  }} className="w-3.5 h-3.5 accent-blue-500"/>
+                  Select All ({visible.length})
+                </label>
+                {anyChecked&&(
+                  <>
+                    <span className="text-xs text-blue-400 bg-blue-500/10 border border-blue-500/20 px-2 py-1 rounded-full">{selClasses.size} selected</span>
+                    <button onClick={async()=>{
+                      if(!confirm(`Delete ${selClasses.size} class(es)? Students will be unassigned but NOT deleted.`)) return;
+                      const ids=[...selClasses];
+                      upd(s=>({...s,classes:s.classes.filter(c=>!ids.includes(c.id)),students:s.students.map(st=>ids.includes(st.classId)?{...st,classId:""}:st)}));
+                      if(sb.isConfigured()) await Promise.all(ids.flatMap(id=>[
+                        sb.delete("classes",id).catch(()=>{}),
+                        ...state.students.filter(st=>st.classId===id).map(st=>sb.update("students",st.id,{class_id:null}).catch(()=>{}))
+                      ]));
+                      setSelClasses(new Set());
+                    }} className="flex items-center gap-1.5 bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 text-xs px-3 py-1.5 rounded-lg transition-colors">
+                      <Trash2 size={11}/>Delete Selected
+                    </button>
+                  </>
+                )}
+                {!isSA&&<button onClick={async()=>{
+                  if(!state.classes.length){alert("No classes to delete.");return;}
+                  if(!confirm(`Delete ALL ${state.classes.length} classes? Students will be unassigned but NOT deleted.`)) return;
+                  const ids=state.classes.map(c=>c.id);
+                  upd(s=>({...s,classes:[],students:s.students.map(st=>({...st,classId:""}))}));
+                  if(sb.isConfigured()) await Promise.all(ids.map(id=>sb.delete("classes",id).catch(()=>{})));
+                  setSelClasses(new Set());
+                }} className="flex items-center gap-1.5 bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 text-xs px-3 py-1.5 rounded-lg transition-colors ml-auto">
+                  <Trash2 size={11}/>Delete All Classes
+                </button>}
+              </div>
+            );
+          })()}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {state.classes.map(cls=>{
               const teacher=state.teachers.find(t=>t.id===cls.teacherId);
               const sc2=state.students.filter(s=>s.classId===cls.id).length;
               const sub=state.subjects.filter(s=>s.classIds.includes(cls.id)).length;
               return(
-                <div key={cls.id} className="bg-[#080D18] border border-white/5 rounded-xl p-5 hover:border-blue-500/30 transition-all">
+                <div key={cls.id} className={`bg-[#080D18] border rounded-xl p-5 hover:border-blue-500/30 transition-all ${selClasses.has(cls.id)?"border-blue-500/30 bg-blue-500/5":"border-white/5"}`}>
                   <div className="flex items-start justify-between mb-4">
-                    <div className="w-12 h-12 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center"><span className="text-base font-bold text-blue-400">{cls.name}{cls.section}</span></div>
+                    <div className="flex items-center gap-3">
+                      <input type="checkbox" checked={selClasses.has(cls.id)} onChange={e=>{const n=new Set(selClasses);e.target.checked?n.add(cls.id):n.delete(cls.id);setSelClasses(n);}} className="w-3.5 h-3.5 accent-blue-500 cursor-pointer mt-0.5"/>
+                      <div className="w-12 h-12 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center"><span className="text-base font-bold text-blue-400">{cls.name}{cls.section}</span></div>
+                    </div>
                     {!isSA&&(
                       <div className="flex gap-2">
                         <button onClick={()=>setPopup({type:"editClass",data:cls})} className="text-white/20 hover:text-blue-400 transition-colors" title="Edit Class Teacher"><Edit2 size={14}/></button>
@@ -2574,7 +2644,8 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
                           if(!confirm(`Delete class ${cls.name}-${cls.section}? Students will be unassigned but NOT deleted.`)) return;
                           upd(s=>({...s,classes:s.classes.filter(c=>c.id!==cls.id),students:s.students.map(st=>st.classId===cls.id?{...st,classId:""}:st)}));
                           try{await sb.delete("classes",cls.id);const aff=state.students.filter(st=>st.classId===cls.id);await Promise.all(aff.map(st=>sb.update("students",st.id,{class_id:null}).catch(()=>{})));}catch(e){console.warn("[sb.classes delete]",e);}
-                        }} className="text-white/20 hover:text-red-400 transition-colors" title="Delete class (students preserved)"><Trash2 size={14}/></button>
+                          setSelClasses(p=>{const n=new Set(p);n.delete(cls.id);return n;});
+                        }} className="text-white/20 hover:text-red-400 transition-colors" title="Delete class"><Trash2 size={14}/></button>
                       </div>
                     )}
                   </div>
@@ -2603,34 +2674,74 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
           </div>
           {csvMsg&&<div className="flex items-center gap-2 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-2.5"><CheckCircle size={12}/><span className="flex-1">{csvMsg}</span><button onClick={()=>setCsvMsg("")} className="text-white/30 hover:text-white/60"><X size={11}/></button></div>}
           <div className="text-[10px] text-white/30 bg-white/3 border border-white/5 rounded-lg px-3 py-2">CSV columns: <span className="font-mono text-white/50">name*, code*, category, classes (9-A|10-B), teacher_emails (email1|email2)</span></div>
+          {/* Subject bulk actions */}
+          {(()=>{
+            const visible=state.subjects;
+            const allChecked=visible.length>0&&visible.every(s=>selSubjects.has(s.id));
+            const anyChecked=selSubjects.size>0;
+            return(
+              <div className="flex items-center gap-3 flex-wrap">
+                <label className="flex items-center gap-2 cursor-pointer select-none text-xs text-white/50 hover:text-white/70">
+                  <input type="checkbox" checked={allChecked} onChange={e=>{
+                    if(e.target.checked) setSelSubjects(new Set(visible.map(s=>s.id)));
+                    else setSelSubjects(new Set());
+                  }} className="w-3.5 h-3.5 accent-blue-500"/>
+                  Select All ({visible.length})
+                </label>
+                {anyChecked&&(
+                  <>
+                    <span className="text-xs text-blue-400 bg-blue-500/10 border border-blue-500/20 px-2 py-1 rounded-full">{selSubjects.size} selected</span>
+                    <button onClick={async()=>{
+                      if(!confirm(`Delete ${selSubjects.size} subject(s)?`)) return;
+                      const ids=[...selSubjects];
+                      upd(s=>({...s,subjects:s.subjects.filter(x=>!ids.includes(x.id))}));
+                      if(sb.isConfigured()) await Promise.all(ids.map(id=>sb.delete("subjects",id).catch(()=>{})));
+                      setSelSubjects(new Set());
+                    }} className="flex items-center gap-1.5 bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 text-xs px-3 py-1.5 rounded-lg transition-colors">
+                      <Trash2 size={11}/>Delete Selected
+                    </button>
+                  </>
+                )}
+                <button onClick={async()=>{
+                  if(!state.subjects.length){alert("No subjects to delete.");return;}
+                  if(!confirm(`Delete ALL ${state.subjects.length} subjects? Cannot be undone.`)) return;
+                  const ids=state.subjects.map(s=>s.id);
+                  upd(s=>({...s,subjects:[]}));
+                  if(sb.isConfigured()) await Promise.all(ids.map(id=>sb.delete("subjects",id).catch(()=>{})));
+                  setSelSubjects(new Set());
+                }} className="flex items-center gap-1.5 bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 text-xs px-3 py-1.5 rounded-lg transition-colors ml-auto">
+                  <Trash2 size={11}/>Delete All Subjects
+                </button>
+              </div>
+            );
+          })()}
           <div className="bg-[#080D18] border border-white/5 rounded-xl overflow-hidden overflow-x-auto">
             <table className="w-full">
-              <thead><tr className="border-b border-white/5">{["Code","Subject","Category","Classes","Teacher",""].map(h=><th key={h} className="text-left text-xs font-semibold text-white/40 uppercase tracking-wider px-4 py-3">{h}</th>)}</tr></thead>
+              <thead><tr className="border-b border-white/5"><th className="px-4 py-3 w-8"></th>{["Code","Subject","Category","Classes","Teacher",""].map(h=><th key={h} className="text-left text-xs font-semibold text-white/40 uppercase tracking-wider px-4 py-3">{h}</th>)}</tr></thead>
               <tbody>{state.subjects.map(sub=>{
                 const teachers=state.teachers.filter(t=>(sub.teacherIds||[]).includes(t.id));
                 const classes=state.classes.filter(c=>sub.classIds.includes(c.id));
                 return(
-                  <tr key={sub.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                  <tr key={sub.id} className={`border-b border-white/5 hover:bg-white/5 transition-colors ${selSubjects.has(sub.id)?"bg-blue-500/5":""}`}>
+                    <td className="px-4 py-3"><input type="checkbox" checked={selSubjects.has(sub.id)} onChange={e=>{const n=new Set(selSubjects);e.target.checked?n.add(sub.id):n.delete(sub.id);setSelSubjects(n);}} className="w-3.5 h-3.5 accent-blue-500 cursor-pointer"/></td>
                     <td className="px-4 py-3"><span className="font-mono text-xs text-blue-400 bg-blue-500/10 px-2 py-1 rounded">{sub.code}</span></td>
                     <td className="px-4 py-3 text-sm text-white">{sub.name}</td>
                     <td className="px-4 py-3"><span className="text-xs px-2 py-1 rounded bg-white/5 text-white/50">{sub.category||"General"}</span></td>
                     <td className="px-4 py-3"><div className="flex gap-1 flex-wrap">{classes.map(c=><span key={c.id} className="text-xs bg-white/5 text-white/50 px-2 py-0.5 rounded">{c.name}-{c.section}</span>)}</div></td>
                     <td className="px-4 py-3">
                       {teachers.length>0
-                        ? <div className="flex flex-col gap-1">
-                            {teachers.map(t=>(
-                              <div key={t.id} className="flex items-center gap-1.5">
-                                {<img src={t.photo||teacherAvatar(t.name,t.profile?.gender,t.is_counselor?"counselor":undefined)} className="w-5 h-5 rounded-full object-cover border border-white/10 flex-shrink-0"/>}
-                                <span className="text-xs text-white/70">{t.name}</span>
-                              </div>
-                            ))}
-                          </div>
-                        : <span className="text-xs text-amber-400/70 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full">No teacher</span>}
+                        ?<div className="flex flex-col gap-1">{teachers.map(t=>(
+                            <div key={t.id} className="flex items-center gap-1.5">
+                              <img src={t.photo||teacherAvatar(t.name,t.profile?.gender,t.is_counselor?"counselor":undefined)} className="w-5 h-5 rounded-full object-cover border border-white/10 flex-shrink-0"/>
+                              <span className="text-xs text-white/70">{t.name}</span>
+                            </div>
+                          ))}</div>
+                        :<span className="text-xs text-amber-400/70 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full">No teacher</span>}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex gap-1.5">
                         <button onClick={()=>setPopup({type:"editSubject",data:sub})} className="flex items-center gap-1 text-xs border border-blue-500/30 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 px-2.5 py-1.5 rounded-lg transition-colors"><Edit2 size={11}/>Edit</button>
-                        <button onClick={async()=>{upd(s=>({...s,subjects:s.subjects.filter(x=>x.id!==sub.id)}));try{await sb.delete("subjects",sub.id);}catch(e){console.warn("[sb.subjects delete]",e);}}} className="text-white/20 hover:text-red-400 transition-colors p-1.5"><Trash2 size={13}/></button>
+                        <button onClick={async()=>{upd(s=>({...s,subjects:s.subjects.filter(x=>x.id!==sub.id)}));try{await sb.delete("subjects",sub.id);}catch(e){console.warn(e);}setSelSubjects(p=>{const n=new Set(p);n.delete(sub.id);return n;});}} className="text-white/20 hover:text-red-400 transition-colors p-1.5"><Trash2 size={13}/></button>
                       </div>
                     </td>
                   </tr>
@@ -2656,6 +2767,48 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
           </div>
           {csvMsg&&<div className="flex items-center gap-2 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-2.5"><CheckCircle size={12}/><span className="flex-1">{csvMsg}</span><button onClick={()=>setCsvMsg("")} className="text-white/30 hover:text-white/60"><X size={11}/></button></div>}
           <div className="text-[10px] text-white/30 bg-white/3 border border-white/5 rounded-lg px-3 py-2">CSV columns: <span className="font-mono text-white/50">name, email, password, dob, gender, phone, address, qualification, specialization, join_date, nic</span></div>
+          {/* Teacher bulk actions */}
+          {(()=>{
+            const visible=state.teachers.filter(t=>t.status!=="pending");
+            const allChecked=visible.length>0&&visible.every(t=>selTeachers.has(t.id));
+            const anyChecked=selTeachers.size>0;
+            return(
+              <div className="flex items-center gap-3 flex-wrap">
+                <label className="flex items-center gap-2 cursor-pointer select-none text-xs text-white/50 hover:text-white/70">
+                  <input type="checkbox" checked={allChecked} onChange={e=>{
+                    if(e.target.checked) setSelTeachers(new Set(visible.map(t=>t.id)));
+                    else setSelTeachers(new Set());
+                  }} className="w-3.5 h-3.5 accent-blue-500"/>
+                  Select All ({visible.length})
+                </label>
+                {anyChecked&&(
+                  <>
+                    <span className="text-xs text-blue-400 bg-blue-500/10 border border-blue-500/20 px-2 py-1 rounded-full">{selTeachers.size} selected</span>
+                    <button onClick={async()=>{
+                      if(!confirm(`Delete ${selTeachers.size} teacher(s)?`)) return;
+                      const ids=[...selTeachers];
+                      upd(s=>({...s,teachers:s.teachers.filter(t=>!ids.includes(t.id))}));
+                      if(sb.isConfigured()) await Promise.all(ids.map(id=>sb.delete("teachers",id).catch(()=>{})));
+                      setSelTeachers(new Set());
+                    }} className="flex items-center gap-1.5 bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 text-xs px-3 py-1.5 rounded-lg transition-colors">
+                      <Trash2 size={11}/>Delete Selected
+                    </button>
+                  </>
+                )}
+                {!isSA&&<button onClick={async()=>{
+                  const all=state.teachers.filter(t=>t.status!=="pending");
+                  if(!all.length){alert("No teachers to delete.");return;}
+                  if(!confirm(`Delete ALL ${all.length} teachers? Cannot be undone.`)) return;
+                  const ids=all.map(t=>t.id);
+                  upd(s=>({...s,teachers:s.teachers.filter(t=>!ids.includes(t.id))}));
+                  if(sb.isConfigured()) await Promise.all(ids.map(id=>sb.delete("teachers",id).catch(()=>{})));
+                  setSelTeachers(new Set());
+                }} className="flex items-center gap-1.5 bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 text-xs px-3 py-1.5 rounded-lg transition-colors ml-auto">
+                  <Trash2 size={11}/>Delete All Teachers
+                </button>}
+              </div>
+            );
+          })()}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {state.teachers.filter(t=>t.status!=="pending").map(t=>{
               const subs=state.subjects.filter(s=>(s.teacherIds||[]).includes(t.id));
@@ -2663,8 +2816,9 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
               const ownCls=state.classes.filter(c=>c.teacherId===t.id);
               const d=decProfile(t.profile);
               return(
-                <div key={t.id} className="bg-[#080D18] border border-white/5 rounded-xl p-5 hover:border-blue-500/20 transition-all">
+                <div key={t.id} className={`bg-[#080D18] border rounded-xl p-5 hover:border-blue-500/20 transition-all ${selTeachers.has(t.id)?"border-blue-500/30 bg-blue-500/5":"border-white/5"}`}>
                   <div className="flex items-center gap-3 mb-4">
+                    <input type="checkbox" checked={selTeachers.has(t.id)} onChange={e=>{const n=new Set(selTeachers);e.target.checked?n.add(t.id):n.delete(t.id);setSelTeachers(n);}} className="w-3.5 h-3.5 accent-blue-500 cursor-pointer flex-shrink-0"/>
                     {<img src={t.photo||teacherAvatar(t.name,t.profile?.gender,t.is_counselor?"counselor":undefined)} className="w-10 h-10 rounded-full object-cover border border-white/10 flex-shrink-0"/>}
                     <div className="flex-1 min-w-0">
                       <div className="text-white font-semibold">{t.name}</div>
@@ -2672,8 +2826,8 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
                       {d.phone&&<div className="text-xs text-white/25 flex items-center gap-1 mt-0.5"><Phone size={9}/>{d.phone}</div>}
                     </div>
                     <div className="flex gap-1.5 ml-auto">
-                      <button onClick={()=>setEditTch(t)} className="flex items-center gap-1.5 text-xs border border-blue-500/30 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 px-2.5 py-1.5 rounded-lg transition-colors font-medium" title="Edit Profile"><Edit2 size={12}/>Edit</button>
-                      {!isSA&&<button onClick={()=>db.deleteTeacher(t.id)} className="text-white/20 hover:text-red-400 transition-colors p-1"><Trash2 size={14}/></button>}
+                      <button onClick={()=>setEditTch(t)} className="flex items-center gap-1.5 text-xs border border-blue-500/30 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 px-2.5 py-1.5 rounded-lg transition-colors font-medium"><Edit2 size={12}/>Edit</button>
+                      {!isSA&&<button onClick={async()=>{if(!confirm("Delete this teacher?"))return;upd(s=>({...s,teachers:s.teachers.filter(x=>x.id!==t.id)}));if(sb.isConfigured())await sb.delete("teachers",t.id).catch(()=>{});setSelTeachers(p=>{const n=new Set(p);n.delete(t.id);return n;});}} className="text-white/20 hover:text-red-400 transition-colors p-1"><Trash2 size={14}/></button>}
                     </div>
                   </div>
                   {ownCls.length>0&&<div className="mb-2"><span className="text-xs bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full">Class Teacher: {ownCls.map(c=>`${c.name}-${c.section}`).join(", ")}</span></div>}
@@ -2753,22 +2907,66 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
               {state.classes.map(c=><option key={c.id} value={c.id}>Class {c.name}-{c.section}</option>)}
             </select>
           </div>
+          {/* Bulk actions bar */}
+          {(()=>{
+            const visible=state.students.filter(st=>st.status!=="pending"&&(adminClassF==="all"||st.classId===adminClassF)&&(!adminSearch||st.name.toLowerCase().includes(adminSearch.toLowerCase())||st.rollNo.includes(adminSearch)));
+            const allChecked=visible.length>0&&visible.every(st=>selStudents.has(st.id));
+            const anyChecked=selStudents.size>0;
+            return(
+              <div className="flex items-center gap-3 flex-wrap">
+                <label className="flex items-center gap-2 cursor-pointer select-none text-xs text-white/50 hover:text-white/70">
+                  <input type="checkbox" checked={allChecked} onChange={e=>{
+                    if(e.target.checked) setSelStudents(new Set(visible.map(s=>s.id)));
+                    else setSelStudents(new Set());
+                  }} className="w-3.5 h-3.5 accent-blue-500"/>
+                  Select All ({visible.length})
+                </label>
+                {anyChecked&&(
+                  <>
+                    <span className="text-xs text-blue-400 bg-blue-500/10 border border-blue-500/20 px-2 py-1 rounded-full">{selStudents.size} selected</span>
+                    <button onClick={async()=>{
+                      if(!confirm(`Delete ${selStudents.size} student(s)? This cannot be undone.`)) return;
+                      const ids=[...selStudents];
+                      upd(s=>({...s,students:s.students.filter(st=>!ids.includes(st.id))}));
+                      if(sb.isConfigured()) await Promise.all(ids.map(id=>sb.delete("students",id).catch(()=>{})));
+                      setSelStudents(new Set());
+                    }} className="flex items-center gap-1.5 bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 text-xs px-3 py-1.5 rounded-lg transition-colors">
+                      <Trash2 size={11}/>Delete Selected
+                    </button>
+                  </>
+                )}
+                {adminClassF!=="all"&&(
+                  <button onClick={async()=>{
+                    const classStudents=state.students.filter(st=>st.classId===adminClassF&&st.status!=="pending");
+                    if(!classStudents.length){alert("No students in this class.");return;}
+                    if(!confirm(`Delete ALL ${classStudents.length} students in this class? Cannot be undone.`)) return;
+                    const ids=classStudents.map(s=>s.id);
+                    upd(s=>({...s,students:s.students.filter(st=>!ids.includes(st.id))}));
+                    if(sb.isConfigured()) await Promise.all(ids.map(id=>sb.delete("students",id).catch(()=>{})));
+                    setSelStudents(new Set());
+                  }} className="flex items-center gap-1.5 bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 text-xs px-3 py-1.5 rounded-lg transition-colors ml-auto">
+                    <Trash2 size={11}/>Delete All in Class
+                  </button>
+                )}
+              </div>
+            );
+          })()}
           <div className="bg-[#080D18] border border-white/5 rounded-xl overflow-hidden overflow-x-auto">
             <table className="w-full">
-              <thead><tr className="border-b border-white/5">{["","Roll","Name","Class","Profile",""].map((h,i)=><th key={i} className="text-left text-xs font-semibold text-white/40 uppercase tracking-wider px-4 py-3">{h}</th>)}</tr></thead>
+              <thead><tr className="border-b border-white/5"><th className="px-4 py-3 w-8"></th>{["Roll","Name","Class","Profile",""].map((h,i)=><th key={i} className="text-left text-xs font-semibold text-white/40 uppercase tracking-wider px-4 py-3">{h}</th>)}</tr></thead>
               <tbody>{state.students.filter(st=>st.status!=="pending"&&(adminClassF==="all"||st.classId===adminClassF)&&(!adminSearch||st.name.toLowerCase().includes(adminSearch.toLowerCase())||st.rollNo.includes(adminSearch))).map(st=>{
                 const cls=state.classes.find(c=>c.id===st.classId);
                 const d=decProfile(st.profile);
                 return(
-                  <tr key={st.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
-                    <td className="px-4 py-3"><img src={st.photo||undefined} className="w-8 h-8 rounded-full bg-white/10"/></td>
+                  <tr key={st.id} className={`border-b border-white/5 hover:bg-white/5 transition-colors ${selStudents.has(st.id)?"bg-blue-500/5":""}`}>
+                    <td className="px-4 py-3"><input type="checkbox" checked={selStudents.has(st.id)} onChange={e=>{const n=new Set(selStudents);e.target.checked?n.add(st.id):n.delete(st.id);setSelStudents(n);}} className="w-3.5 h-3.5 accent-blue-500 cursor-pointer"/></td>
                     <td className="px-4 py-3 font-mono text-xs text-white/40">{st.rollNo}</td>
-                    <td className="px-4 py-3 text-sm text-white">{st.name}</td>
+                    <td className="px-4 py-3"><div className="flex items-center gap-2"><img src={st.photo||undefined} className="w-7 h-7 rounded-full bg-white/10 flex-shrink-0"/><span className="text-sm text-white">{st.name}</span></div></td>
                     <td className="px-4 py-3 text-sm text-white/60">{cls?`${cls.name}-${cls.section}`:"–"}</td>
                     <td className="px-4 py-3"><div className="flex gap-2 text-xs">{d.bloodGroup&&<span className="bg-red-500/10 text-red-400 px-1.5 py-0.5 rounded font-mono">{d.bloodGroup}</span>}{d.phone&&<span className="text-white/30 flex items-center gap-0.5"><Phone size={9}/>{d.phone}</span>}</div></td>
                     <td className="px-4 py-3"><div className="flex gap-1.5">
                       <button onClick={()=>setEditSt(st)} className="text-white/20 hover:text-blue-400 transition-colors p-1" title="Edit Profile"><User size={13}/></button>
-                      {!isSA&&<button onClick={()=>db.deleteStudent(st.id)} className="text-white/20 hover:text-red-400 transition-colors p-1"><Trash2 size={14}/></button>}
+                      {!isSA&&<button onClick={async()=>{if(!confirm("Delete this student?"))return;upd(s=>({...s,students:s.students.filter(x=>x.id!==st.id)}));if(sb.isConfigured())await sb.delete("students",st.id).catch(()=>{});setSelStudents(p=>{const n=new Set(p);n.delete(st.id);return n;});}} className="text-white/20 hover:text-red-400 transition-colors p-1"><Trash2 size={14}/></button>}
                     </div></td>
                   </tr>
                 );
@@ -3201,9 +3399,10 @@ function TeacherView({user,state,setState,onLogout,onBackToSite,db}:
   const [sc,setSC]         = useState("");
   const [ss,setSS]         = useState("");
   const [me,setME]         = useState<Record<string,string>>({});
-  const [marksMode,setMarksMode] = useState<"current"|"exam">("current");
+  const [marksMode,setMarksMode] = useState<"monthly"|"exam">("monthly");
   const [marksYear,setMarksYear] = useState<number>(new Date().getFullYear());
   const [marksExamId,setMarksExamId] = useState<string>("");
+  const [marksMonth,setMarksMonth] = useState<string>(()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;});
   const [search,setSearch] = useState("");
   const [shCls,setShCls]   = useState("");
   const [editSt,setEditSt] = useState<Student|null>(null);
@@ -3558,15 +3757,26 @@ function TeacherView({user,state,setState,onLogout,onBackToSite,db}:
         const examYears=[...new Set(state.exams.map(e=>e.year))].sort((a,b)=>b-a);
         const examsForYear=state.exams.filter(e=>e.year===(marksYear||examYears[0]));
         const isSavingToExam=marksMode==="exam"&&marksExamId;
+        const marksMonthLabel=(()=>{const [y,m]=marksMonth.split("-");return new Date(Number(y),Number(m)-1,1).toLocaleString("default",{month:"long",year:"numeric"});})();
+        const monthPrefix=`monthly_${marksMonth}_`;
         return(
         <div className="space-y-4 max-w-3xl">
           <h2 className="text-xl font-bold text-white">Enter Marks</h2>
           {/* Mode toggle */}
           <div className="flex gap-2 p-1 bg-white/5 rounded-xl w-fit">
-            <button onClick={()=>setMarksMode("current")} className={`text-xs px-4 py-2 rounded-lg font-medium transition-all ${marksMode==="current"?"bg-blue-600 text-white":"text-white/40 hover:text-white/70"}`}>Current Marks</button>
-            <button onClick={()=>setMarksMode("exam")} className={`text-xs px-4 py-2 rounded-lg font-medium transition-all ${marksMode==="exam"?"bg-purple-600 text-white":"text-white/40 hover:text-white/70"}`}>Exam Records</button>
+            <button onClick={()=>setMarksMode("monthly")} className={`text-xs px-4 py-2 rounded-lg font-medium transition-all ${marksMode==="monthly"?"bg-blue-600 text-white":"text-white/40 hover:text-white/70"}`}>📆 Monthly Test</button>
+            <button onClick={()=>setMarksMode("exam")} className={`text-xs px-4 py-2 rounded-lg font-medium transition-all ${marksMode==="exam"?"bg-purple-600 text-white":"text-white/40 hover:text-white/70"}`}>📝 Exam Records</button>
           </div>
-          {/* Exam selector row */}
+          {/* Monthly picker */}
+          {marksMode==="monthly"&&(
+            <div className="flex gap-3 flex-wrap items-center bg-blue-500/5 border border-blue-500/20 rounded-xl p-3">
+              <span className="text-xs text-blue-300/60 font-medium">Month:</span>
+              <input type="month" value={marksMonth} onChange={e=>setMarksMonth(e.target.value)}
+                className="bg-[#05080F] border border-white/10 text-white text-sm rounded-lg px-3 py-2 outline-none [color-scheme:dark]"/>
+              <span className="text-xs text-blue-300 bg-blue-500/10 px-3 py-1 rounded-full border border-blue-500/20">{marksMonthLabel}</span>
+            </div>
+          )}
+          {/* Exam selector */}
           {marksMode==="exam"&&(
             <div className="flex gap-3 flex-wrap items-center bg-purple-500/5 border border-purple-500/20 rounded-xl p-3">
               <select value={marksYear||examYears[0]||""} onChange={e=>setMarksYear(Number(e.target.value))} className="bg-[#05080F] border border-white/10 text-white text-sm rounded-lg px-3 py-2 outline-none">
@@ -3595,7 +3805,11 @@ function TeacherView({user,state,setState,onLogout,onBackToSite,db}:
           {sc&&ss?(
             <div className="bg-[#080D18] border border-white/5 rounded-xl overflow-hidden">
               <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between">
-                <span className="text-sm text-white/60">{state.subjects.find(s=>s.id===ss)?.name} {isSavingToExam&&<span className="text-purple-400 text-xs ml-2">→ {state.exams.find(e=>e.id===marksExamId)?.name}</span>}</span>
+                <span className="text-sm text-white/60">
+                  {state.subjects.find(s=>s.id===ss)?.name}
+                  {isSavingToExam&&<span className="text-purple-400 text-xs ml-2">→ {state.exams.find(e=>e.id===marksExamId)?.name}</span>}
+                  {marksMode==="monthly"&&<span className="text-blue-400 text-xs ml-2">→ {marksMonthLabel}</span>}
+                </span>
                 <button onClick={()=>{
                   if(marksMode==="exam"&&marksExamId){
                     const newRecs:ExamRecord[]=[];
@@ -3603,23 +3817,26 @@ function TeacherView({user,state,setState,onLogout,onBackToSite,db}:
                     Object.entries(me).forEach(([id,v])=>{const n=parseFloat(v);if(!isNaN(n))newRecs.push({id:uid(),examId:marksExamId,studentId:id,subjectId:ss,marks:n});});
                     setState(s=>({...s,examRecords:[...s.examRecords.filter(r=>!(r.examId===marksExamId&&r.subjectId===ss&&classStudents.some(st=>st.id===r.studentId))),...newRecs]}));
                   } else {
+                    // Monthly mode — save with month-prefixed key
                     const upds:Record<string,number>={};
                     Object.entries(me).forEach(([id,v])=>{const n=parseFloat(v);if(!isNaN(n))upds[id]=n;});
                     setState(s=>{
-                      const updated=s.students.map(st=>upds[st.id]!==undefined?{...st,marks:{...st.marks,[ss]:upds[st.id]}}:st);
+                      const updated=s.students.map(st=>upds[st.id]!==undefined?{...st,marks:{...st.marks,[monthPrefix+ss]:upds[st.id]}}:st);
                       updated.filter(st=>upds[st.id]!==undefined).forEach(st=>{try{sb.update("students",st.id,{marks:st.marks});}catch{}});
                       return {...s,students:updated};
                     });
                   }
                   setME({});
-                }} className={`flex items-center gap-2 text-xs ${isSavingToExam?"bg-purple-500/20 text-purple-400 border-purple-500/20 hover:bg-purple-500/30":"bg-emerald-500/20 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/30"} border px-3 py-1.5 rounded-lg transition-colors`}><Save size={12}/>Save {isSavingToExam?"to Exam":""}</button>
+                }} className={`flex items-center gap-2 text-xs ${isSavingToExam?"bg-purple-500/20 text-purple-400 border-purple-500/20 hover:bg-purple-500/30":"bg-blue-500/20 text-blue-400 border-blue-500/20 hover:bg-blue-500/30"} border px-3 py-1.5 rounded-lg transition-colors`}>
+                  <Save size={12}/>Save {isSavingToExam?"to Exam":"Monthly"}
+                </button>
               </div>
               <table className="w-full">
                 <thead><tr className="border-b border-white/5">{["Student","Roll","Previous","Enter /100"].map(h=><th key={h} className="text-left text-xs font-semibold text-white/40 uppercase px-4 py-3">{h}</th>)}</tr></thead>
                 <tbody>{state.students.filter(s=>s.classId===sc).map(st=>{
                   const cur=marksMode==="exam"&&marksExamId
                     ? (state.examRecords.find(r=>r.examId===marksExamId&&r.studentId===st.id&&r.subjectId===ss)?.marks)
-                    : st.marks[ss];
+                    : st.marks[monthPrefix+ss];
                   return(
                     <tr key={st.id} className="border-b border-white/5 hover:bg-white/5">
                       <td className="px-4 py-3"><div className="flex items-center gap-2"><img src={st.photo||undefined} className="w-7 h-7 rounded-full"/><span className="text-sm text-white">{st.name}</span></div></td>
@@ -4252,9 +4469,14 @@ function StudentResults({student,state,myClass,mySubjects,myRank,classStudents}:
   myRank:number; classStudents:Student[];
 }) {
   const exams = state.exams || [];
-  const [mode,   setMode]   = React.useState<"term"|"exam">("term");
-  const [term,   setTerm]   = React.useState("Term 1");
+  const [mode,   setMode]   = React.useState<"monthly"|"exam">("monthly");
+  const [month,  setMonth]  = React.useState(()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;});
   const [examId, setExamId] = React.useState(exams[0]?.id||"");
+
+  const monthLabel = React.useMemo(()=>{
+    const [y,m]=month.split("-");
+    return new Date(Number(y),Number(m)-1,1).toLocaleString("default",{month:"long",year:"numeric"});
+  },[month]);
 
   // Build marks for the selected source
   const marksMap: Record<string,number|undefined> = React.useMemo(()=>{
@@ -4264,28 +4486,40 @@ function StudentResults({student,state,myClass,mySubjects,myRank,classStudents}:
       recs.forEach(r=>{ m[r.subjectId]=r.marks; });
       return m;
     }
-    // term mode — use student.marks (keyed by subjectId)
-    return student.marks as Record<string,number|undefined>;
-  },[mode, examId, student, state.examRecords]);
+    // monthly mode — read month-prefixed keys
+    const prefix=`monthly_${month}_`;
+    const m: Record<string,number|undefined>={};
+    Object.keys(student.marks||{}).forEach(k=>{
+      if(k.startsWith(prefix)) m[k.replace(prefix,"")]=student.marks[k] as number;
+    });
+    return m;
+  },[mode, examId, month, student, state.examRecords]);
 
   const validMarks = mySubjects.map(s=>marksMap[s.id]).filter(m=>m!==undefined) as number[];
   const total      = validMarks.reduce((a,b)=>a+b,0);
   const avg        = validMarks.length ? Math.round((total/validMarks.length)*10)/10 : 0;
   const grade      = getGrade(avg);
 
-  // Rank among classmates for this specific exam/term
+  // Rank among classmates for this specific source
   const myRankForSource = React.useMemo(()=>{
-    if (mode==="term") return myRank;
+    if (mode==="monthly"){
+      const prefix=`monthly_${month}_`;
+      const ranked=classStudents.map(st=>{
+        const t=Object.keys(st.marks||{}).filter(k=>k.startsWith(prefix)).reduce((a,k)=>a+((st.marks[k] as number)||0),0);
+        return {id:st.id,total:t};
+      }).sort((a,b)=>b.total-a.total);
+      return ranked.findIndex(r=>r.id===student.id)+1;
+    }
     const ranked = classStudents.map(st=>{
       const recs=(state.examRecords||[]).filter(r=>r.examId===examId&&r.studentId===st.id);
       const t=recs.reduce((a,r)=>a+(r.marks||0),0);
       return {id:st.id, total:t};
     }).sort((a,b)=>b.total-a.total);
     return ranked.findIndex(r=>r.id===student.id)+1;
-  },[mode, examId, classStudents, student, state.examRecords, myRank]);
+  },[mode, examId, month, classStudents, student, state.examRecords, myRank]);
 
   const selectedExamName = exams.find(e=>e.id===examId)?.name || "";
-  const resultLabel      = mode==="exam" ? selectedExamName : term;
+  const resultLabel      = mode==="exam" ? selectedExamName : monthLabel;
 
   return(
     <div className="space-y-4 max-w-xl">
@@ -4301,27 +4535,24 @@ function StudentResults({student,state,myClass,mySubjects,myRank,classStudents}:
 
       {/* Mode + selector bar */}
       <div className="bg-[#080D18] border border-white/8 rounded-2xl p-4 space-y-3">
-        {/* Term / Exam toggle */}
+        {/* Monthly / Exam toggle */}
         <div className="flex gap-2">
           <div className="flex bg-white/5 rounded-xl p-1 gap-1">
-            {(["term","exam"] as const).map(m=>(
+            {(["monthly","exam"] as const).map(m=>(
               <button key={m} onClick={()=>setMode(m)}
                 className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${mode===m?"bg-blue-600 text-white shadow":"text-white/40 hover:text-white/70"}`}>
-                {m==="term"?"📅 Term Test":"📝 Exam"}
+                {m==="monthly"?"📆 Monthly Test":"📝 Exam"}
               </button>
             ))}
           </div>
         </div>
 
-        {/* Term buttons OR exam dropdown */}
-        {mode==="term" ? (
-          <div className="flex gap-2 flex-wrap">
-            {["Term 1","Term 2","Term 3","Annual"].map(t=>(
-              <button key={t} onClick={()=>setTerm(t)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${term===t?"bg-blue-600 border-blue-500 text-white":"border-white/10 text-white/40 hover:text-white/70 hover:border-white/20"}`}>
-                {t}
-              </button>
-            ))}
+        {/* Month picker OR exam dropdown */}
+        {mode==="monthly" ? (
+          <div className="flex gap-3 items-center flex-wrap">
+            <input type="month" value={month} onChange={e=>setMonth(e.target.value)}
+              className="bg-[#0d1829] border border-white/10 text-white text-sm rounded-xl px-3 py-2 outline-none focus:border-blue-500/50 [color-scheme:dark]"/>
+            <span className="text-xs text-blue-400 bg-blue-500/10 border border-blue-500/20 px-3 py-1.5 rounded-lg font-medium">{monthLabel}</span>
           </div>
         ):(
           <div className="flex items-center gap-3 flex-wrap">
@@ -4466,23 +4697,38 @@ function StudentView({user,state,setState,onLogout,onBackToSite}:
 
   // Find the most recently created exam that has at least one record for this student
   const latestExamWithResults = [...exams]
-    .reverse() // most recent first (exams are appended, so last = newest)
+    .reverse()
     .find(ex => examRecords.some(r => r.examId===ex.id && r.studentId===student.id));
 
-  // Build dashMarks: from latest exam if available, else fall back to student.marks
+  // Find latest monthly key from student.marks
+  const latestMonthlyKey = React.useMemo(()=>{
+    const months=[...new Set(
+      Object.keys(student.marks||{}).filter(k=>k.startsWith("monthly_")).map(k=>k.split("_")[1])
+    )].filter(Boolean).sort().reverse();
+    return months[0]||null;
+  },[student.marks]);
+
+  // Build dashMarks: exam → monthly → empty
   const dashMarks: Record<string,number|undefined> = latestExamWithResults
-    ? (() => {
-        const m: Record<string,number|undefined> = {};
-        examRecords
-          .filter(r=>r.examId===latestExamWithResults.id && r.studentId===student.id)
-          .forEach(r=>{ m[r.subjectId]=r.marks; });
+    ? (()=>{
+        const m: Record<string,number|undefined>={};
+        examRecords.filter(r=>r.examId===latestExamWithResults.id&&r.studentId===student.id).forEach(r=>{m[r.subjectId]=r.marks;});
         return m;
       })()
-    : student.marks as Record<string,number|undefined>;
+    : latestMonthlyKey
+      ? (()=>{
+          const prefix=`monthly_${latestMonthlyKey}_`;
+          const m: Record<string,number|undefined>={};
+          Object.keys(student.marks||{}).filter(k=>k.startsWith(prefix)).forEach(k=>{m[k.replace(prefix,"")]=student.marks[k] as number;});
+          return m;
+        })()
+      : {};
 
   const dashSource = latestExamWithResults
-    ? `${latestExamWithResults.name} (${latestExamWithResults.year})`
-    : null; // null = using term marks
+    ? `📝 ${latestExamWithResults.name} (${latestExamWithResults.year})`
+    : latestMonthlyKey
+      ? `📆 ${new Date(Number(latestMonthlyKey.split("-")[0]),Number(latestMonthlyKey.split("-")[1])-1,1).toLocaleString("default",{month:"long",year:"numeric"})}`
+      : null;
 
   const validMarks     = mySubjects.map(s=>dashMarks[s.id]).filter(m=>m!==undefined) as number[];
   const total          = validMarks.reduce((a,b)=>a+b,0);
@@ -4494,9 +4740,13 @@ function StudentView({user,state,setState,onLogout,onBackToSite}:
 
   // Rank using same source
   const ranked = classStudents.map(st=>{
-    const marks = latestExamWithResults
-      ? examRecords.filter(r=>r.examId===latestExamWithResults.id&&r.studentId===st.id).reduce((a,r)=>a+(r.marks||0),0)
-      : mySubjects.map(s=>(st.marks[s.id]||0)).reduce((a,b)=>a+b,0);
+    let marks=0;
+    if(latestExamWithResults){
+      marks=examRecords.filter(r=>r.examId===latestExamWithResults.id&&r.studentId===st.id).reduce((a,r)=>a+(r.marks||0),0);
+    } else if(latestMonthlyKey){
+      const prefix=`monthly_${latestMonthlyKey}_`;
+      marks=Object.keys(st.marks||{}).filter(k=>k.startsWith(prefix)).reduce((a,k)=>a+((st.marks[k] as number)||0),0);
+    }
     return {id:st.id, total:marks};
   }).sort((a,b)=>b.total-a.total);
   const myRank = ranked.findIndex(r=>r.id===student.id)+1;
@@ -4522,8 +4772,8 @@ function StudentView({user,state,setState,onLogout,onBackToSite}:
           <div className="flex items-center gap-2">
             <div className="h-px flex-1 bg-white/5"/>
             {dashSource
-              ? <span className="text-[11px] text-purple-400 bg-purple-500/10 border border-purple-500/20 px-3 py-1 rounded-full font-medium whitespace-nowrap">📝 {dashSource}</span>
-              : <span className="text-[11px] text-white/20 bg-white/5 border border-white/8 px-3 py-1 rounded-full whitespace-nowrap">📅 Term Marks</span>
+              ? <span className="text-[11px] text-blue-400 bg-blue-500/10 border border-blue-500/20 px-3 py-1 rounded-full font-medium whitespace-nowrap">{dashSource}</span>
+              : <span className="text-[11px] text-white/20 bg-white/5 border border-white/8 px-3 py-1 rounded-full whitespace-nowrap">No results yet</span>
             }
             <div className="h-px flex-1 bg-white/5"/>
           </div>

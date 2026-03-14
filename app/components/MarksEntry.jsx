@@ -238,8 +238,8 @@ export default function MarksEntry({ db, user, state, setState, exams: examsProp
 
   const [selectedGrade,   setSelectedGrade]   = useState("6");
   const [selectedClass,   setSelectedClass]   = useState("A");
-  const [examMode,        setExamMode]        = useState("term");
-  const [selectedTerm,    setSelectedTerm]    = useState("Term 1");
+  const [examMode,        setExamMode]        = useState("monthly");
+  const [selectedMonth,   setSelectedMonth]   = useState(()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;});
   const [selectedExamId,  setSelectedExamId]  = useState("");
   const [academicYear]                        = useState(String(new Date().getFullYear()));
   const [students,        setStudents]        = useState([]);
@@ -253,8 +253,16 @@ export default function MarksEntry({ db, user, state, setState, exams: examsProp
   const [filter,          setFilter]          = useState("");
   const [error,           setError]           = useState("");
   const [csvImportModal,  setCsvImportModal]  = useState(false);
-  const [csvPreview,      setCsvPreview]      = useState(null); // { rows, errors, matched }
+  const [csvPreview,      setCsvPreview]      = useState(null);
   const [csvApplying,     setCsvApplying]     = useState(false);
+  // CSV destination confirmation modal
+  const [csvDestModal,    setCsvDestModal]    = useState(false);
+  const [pendingCsvFile,  setPendingCsvFile]  = useState(null);
+  // Selected rows for delete
+  const [selectedRows,    setSelectedRows]    = useState(new Set());
+  // Move marks modal
+  const [moveModal,       setMoveModal]       = useState(false);
+  const [moveDest,        setMoveDest]        = useState({grade:"",section:"",subjectId:""});
   const csvFileRef = useRef(null);
   const inputRefs = useRef({});
   const tableScrollRef = useRef(null);
@@ -264,7 +272,7 @@ export default function MarksEntry({ db, user, state, setState, exams: examsProp
 
   const selectedExam = examMode==="exam"
     ? (exams.find(e=>e.id===selectedExamId)?.name||"")
-    : selectedTerm;
+    : (()=>{const [y,m]=selectedMonth.split("-");return `${new Date(Number(y),Number(m)-1,1).toLocaleString("default",{month:"long"})} ${y}`;})();
 
   const perms = derivePermissions(user, state, selectedGrade, selectedClass);
 
@@ -326,6 +334,8 @@ export default function MarksEntry({ db, user, state, setState, exams: examsProp
       });
     }
 
+    // 3. Keep natural order (no sort — preserves CSV upload order)
+
     // 4. Map to display shape — resolve marks from examRecords if exam selected
     const marksFromExam = {};
     if (examMode==="exam" && selectedExamId) {
@@ -338,10 +348,17 @@ export default function MarksEntry({ db, user, state, setState, exams: examsProp
     }
 
     const mapped = stuList.map(st=>{
-      // Build marks keyed by subject id
-      const rawMarks = (examMode==="exam"&&selectedExamId)
-        ? (marksFromExam[st.id]||{})
-        : (st.marks||{});
+      let rawMarks = {};
+      if (examMode==="exam" && selectedExamId) {
+        rawMarks = marksFromExam[st.id] || {};
+      } else {
+        // monthly mode — read month-prefixed keys: monthly_YYYY-MM_subjectId
+        const prefix = `monthly_${selectedMonth}_`;
+        const allM = st.marks || {};
+        Object.keys(allM).forEach(k=>{
+          if (k.startsWith(prefix)) rawMarks[k.replace(prefix,"")] = String(allM[k]);
+        });
+      }
       const marks = {};
       allSubjects.forEach(sub=>{
         marks[sub.id] = String(rawMarks[sub.id]||rawMarks[sub.code]||"");
@@ -559,15 +576,23 @@ export default function MarksEntry({ db, user, state, setState, exams: examsProp
   function handleCsvFileChange(e) {
     const file = e.target.files?.[0];
     if (!file) return;
+    e.target.value = "";
+    // Ask user: monthly test or exam?
+    setPendingCsvFile(file);
+    setCsvDestModal(true);
+  }
+
+  function proceedCsvWithDest() {
+    if (!pendingCsvFile) return;
+    setCsvDestModal(false);
     const reader = new FileReader();
     reader.onload = ev => {
       const result = parseCsvText(ev.target.result);
       setCsvPreview(result);
       setCsvImportModal(true);
     };
-    reader.readAsText(file);
-    // reset input so same file can be re-selected
-    e.target.value = "";
+    reader.readAsText(pendingCsvFile);
+    setPendingCsvFile(null);
   }
 
   function applyCsvImport() {
@@ -627,7 +652,8 @@ export default function MarksEntry({ db, user, state, setState, exams: examsProp
           ]
         }));
       } else {
-        // ── Term mode: write into student.marks keyed by subjectId ──────────
+        // ── Monthly mode: write into student.marks with month-prefixed keys ──
+        const monthPrefix = `monthly_${selectedMonth}_`;
         setState(s=>({
           ...s,
           students: s.students.map(st=>{
@@ -638,7 +664,7 @@ export default function MarksEntry({ db, user, state, setState, exams: examsProp
               if (!canEditSubject(sub)) return;
               const raw = local.marks[sub.id];
               if (raw===undefined || raw==="") return;
-              updMarks[sub.id] = raw==="ab" ? 0 : (Number(raw)||0);
+              updMarks[monthPrefix+sub.id] = raw==="ab" ? 0 : (Number(raw)||0);
             });
             return {...st, marks: updMarks};
           })
@@ -751,12 +777,12 @@ export default function MarksEntry({ db, user, state, setState, exams: examsProp
         </div>
       </div>
 
-      {/* EXAM / TERM SELECTOR */}
+      {/* MODE SELECTOR — Monthly Test / Exam */}
       <div style={{background:"#1e293b",borderBottom:"1px solid #334155",padding:"10px 24px",display:"flex",gap:12,alignItems:"center",flexWrap:"wrap"}}>
         <div style={{display:"flex",background:"#0f172a",borderRadius:8,overflow:"hidden",border:"1px solid #334155"}}>
-          <button onClick={()=>setExamMode("term")}
-            style={{padding:"6px 14px",border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:examMode==="term"?"#3b82f6":"transparent",color:examMode==="term"?"#fff":"#64748b"}}>
-            📅 Term Test
+          <button onClick={()=>setExamMode("monthly")}
+            style={{padding:"6px 14px",border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:examMode==="monthly"?"#3b82f6":"transparent",color:examMode==="monthly"?"#fff":"#64748b"}}>
+            📆 Monthly Test
           </button>
           <button onClick={()=>setExamMode("exam")}
             style={{padding:"6px 14px",border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:examMode==="exam"?"#7c3aed":"transparent",color:examMode==="exam"?"#fff":"#64748b"}}>
@@ -764,15 +790,13 @@ export default function MarksEntry({ db, user, state, setState, exams: examsProp
           </button>
         </div>
 
-        {examMode==="term" ? (
-          <div style={{display:"flex",gap:6}}>
-            {["Term 1","Term 2","Term 3","Annual"].map(t=>(
-              <button key={t} onClick={()=>setSelectedTerm(t)}
-                style={{padding:"5px 12px",borderRadius:8,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,
-                  background:selectedTerm===t?"#3b82f6":"#334155",color:selectedTerm===t?"#fff":"#94a3b8"}}>
-                {t}
-              </button>
-            ))}
+        {examMode==="monthly" ? (
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            <input type="month" value={selectedMonth} onChange={e=>setSelectedMonth(e.target.value)}
+              style={{padding:"5px 10px",borderRadius:8,background:"#334155",border:"1px solid #475569",color:"#e2e8f0",fontSize:13,colorScheme:"dark"}}/>
+            <span style={{fontSize:12,color:"#60a5fa",background:"#1d3461",padding:"4px 10px",borderRadius:20,border:"1px solid #2563eb44"}}>
+              {selectedExam}
+            </span>
           </div>
         ):(
           <div style={{display:"flex",gap:8,alignItems:"center"}}>
@@ -809,7 +833,7 @@ export default function MarksEntry({ db, user, state, setState, exams: examsProp
           <input placeholder="🔍 Search student…" value={filter} onChange={e=>setFilter(e.target.value)}
             style={{padding:"6px 12px",borderRadius:8,background:"#334155",border:"1px solid #475569",color:"#e2e8f0",fontSize:13,width:200}}/>
 
-          {/* ⬇ Example CSV — always visible so user can see the format even before subjects/students are set up */}
+          {/* ⬇ Example CSV */}
           <button onClick={downloadExampleCsv}
             title="Download a CSV template pre-filled with student adm numbers & names"
             style={{padding:"7px 13px",borderRadius:8,background:"#0f3d2e",border:"1px solid #16a34a55",color:"#4ade80",
@@ -817,7 +841,7 @@ export default function MarksEntry({ db, user, state, setState, exams: examsProp
             ⬇ Example CSV
           </button>
 
-          {/* ⬆ Import CSV — only for users who can edit */}
+          {/* ⬆ Import CSV */}
           {perms.canEdit && (
             <>
               <input ref={csvFileRef} type="file" accept=".csv,text/csv" style={{display:"none"}} onChange={handleCsvFileChange}/>
@@ -828,6 +852,33 @@ export default function MarksEntry({ db, user, state, setState, exams: examsProp
                 ⬆ Import CSV
               </button>
             </>
+          )}
+
+          {/* 🗑 Delete Selected */}
+          {perms.canEdit && selectedRows.size>0 && (
+            <button onClick={()=>{
+              if(!confirm(`Clear marks for ${selectedRows.size} selected student(s)?`)) return;
+              setStudents(prev=>prev.map(st=>{
+                if(!selectedRows.has(st.id)) return st;
+                const cleared={...st.marks};
+                allSubjects.forEach(sub=>{ cleared[sub.id]=""; });
+                return {...st,marks:cleared};
+              }));
+              setSelectedRows(new Set());
+            }}
+              style={{padding:"7px 13px",borderRadius:8,background:"#3d0f0f",border:"1px solid #ef444455",color:"#f87171",
+                cursor:"pointer",fontWeight:600,fontSize:12,display:"flex",alignItems:"center",gap:5,whiteSpace:"nowrap"}}>
+              🗑 Delete ({selectedRows.size})
+            </button>
+          )}
+
+          {/* ↗ Move Marks */}
+          {perms.canEdit && selectedRows.size>0 && (
+            <button onClick={()=>setMoveModal(true)}
+              style={{padding:"7px 13px",borderRadius:8,background:"#1a2f1a",border:"1px solid #16a34a55",color:"#4ade80",
+                cursor:"pointer",fontWeight:600,fontSize:12,display:"flex",alignItems:"center",gap:5,whiteSpace:"nowrap"}}>
+              ↗ Move ({selectedRows.size})
+            </button>
           )}
 
           {perms.canEdit?(
@@ -875,6 +926,15 @@ export default function MarksEntry({ db, user, state, setState, exams: examsProp
           <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,minWidth:900}}>
             <thead>
               <tr style={{background:"#1e3a5f",position:"sticky",top:0,zIndex:10}}>
+                <th style={{...TH,width:36}}>
+                  <input type="checkbox"
+                    checked={displayStudents.length>0&&displayStudents.every(s=>selectedRows.has(s.id))}
+                    onChange={e=>{
+                      if(e.target.checked) setSelectedRows(new Set(displayStudents.map(s=>s.id)));
+                      else setSelectedRows(new Set());
+                    }}
+                    style={{cursor:"pointer",accentColor:"#3b82f6"}}/>
+                </th>
                 <th style={TH}>#</th>
                 <th style={TH}>Adm. No</th>
                 <th style={{...TH,minWidth:150}}>Name</th>
@@ -898,9 +958,14 @@ export default function MarksEntry({ db, user, state, setState, exams: examsProp
               {displayStudents.map((student,si)=>{
                 const total=calcTotal(student), avg=calcAvg(student), rank=rankedMap[student.id];
                 return(
-                  <tr key={student.id} style={{background:si%2===0?"#0f172a":"#111827"}}
-                    onMouseEnter={e=>e.currentTarget.style.background="#162033"}
-                    onMouseLeave={e=>e.currentTarget.style.background=si%2===0?"#0f172a":"#111827"}>
+                  <tr key={student.id} style={{background:selectedRows.has(student.id)?"#1a2f4a":si%2===0?"#0f172a":"#111827"}}
+                    onMouseEnter={e=>{if(!selectedRows.has(student.id))e.currentTarget.style.background="#162033";}}
+                    onMouseLeave={e=>{e.currentTarget.style.background=selectedRows.has(student.id)?"#1a2f4a":si%2===0?"#0f172a":"#111827";}}>
+                    <td style={{...TD,width:36}}>
+                      <input type="checkbox" checked={selectedRows.has(student.id)}
+                        onChange={e=>{const n=new Set(selectedRows);e.target.checked?n.add(student.id):n.delete(student.id);setSelectedRows(n);}}
+                        style={{cursor:"pointer",accentColor:"#3b82f6"}}/>
+                    </td>
                     <td style={TD}><span style={{color:"#64748b"}}>{si+1}</span></td>
                     <td style={{...TD,color:"#94a3b8",fontFamily:"monospace"}}>{student.admNo}</td>
                     <td style={{...TD,fontWeight:500,color:"#e2e8f0"}}>{student.name}</td>
@@ -1111,6 +1176,152 @@ export default function MarksEntry({ db, user, state, setState, exams: examsProp
                   {csvApplying ? "⏳ Applying…" : `✓ Apply ${csvPreview.matched} Student${csvPreview.matched!==1?"s":""}`}
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── CSV Destination Modal ─────────────────────────────────────────── */}
+      {csvDestModal && (
+        <div style={{position:"fixed",inset:0,zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16,background:"rgba(0,0,0,0.75)",backdropFilter:"blur(4px)"}}
+          onClick={()=>{setCsvDestModal(false);setPendingCsvFile(null);}}>
+          <div style={{background:"#0d1829",border:"1px solid #1e3a5f",borderRadius:16,width:"100%",maxWidth:420,boxShadow:"0 25px 60px rgba(0,0,0,0.7)"}}
+            onClick={e=>e.stopPropagation()}>
+            <div style={{padding:"20px 24px 16px",borderBottom:"1px solid #1e293b"}}>
+              <h3 style={{margin:0,fontSize:17,fontWeight:700,color:"#f1f5f9"}}>📂 Import CSV — Where to save?</h3>
+              <p style={{margin:"6px 0 0",fontSize:12,color:"#64748b"}}>Choose the destination before importing marks from this file.</p>
+            </div>
+            <div style={{padding:"20px 24px",display:"flex",flexDirection:"column",gap:12}}>
+              <button onClick={()=>{ setExamMode("monthly"); proceedCsvWithDest(); }}
+                style={{padding:"14px 18px",borderRadius:10,border:"2px solid #2563eb44",background:"#1d3461",color:"#f1f5f9",cursor:"pointer",textAlign:"left"}}
+                onMouseEnter={e=>e.currentTarget.style.borderColor="#2563eb"}
+                onMouseLeave={e=>e.currentTarget.style.borderColor="#2563eb44"}>
+                <div style={{fontSize:15,fontWeight:700,marginBottom:4}}>📆 Monthly Test</div>
+                <div style={{fontSize:12,color:"#60a5fa"}}>Saves to: <strong>{(()=>{const [y,m]=selectedMonth.split("-");return `${new Date(Number(y),Number(m)-1,1).toLocaleString("default",{month:"long"})} ${y}`;})()}</strong></div>
+                <div style={{fontSize:11,color:"#475569",marginTop:3}}>Uses current month picker selection</div>
+              </button>
+              <button onClick={()=>{ setExamMode("exam"); proceedCsvWithDest(); }}
+                style={{padding:"14px 18px",borderRadius:10,border:"2px solid #7c3aed44",background:"#1a1040",color:"#f1f5f9",cursor:"pointer",textAlign:"left"}}
+                onMouseEnter={e=>e.currentTarget.style.borderColor="#7c3aed"}
+                onMouseLeave={e=>e.currentTarget.style.borderColor="#7c3aed44"}>
+                <div style={{fontSize:15,fontWeight:700,marginBottom:4}}>📝 Exam</div>
+                <div style={{fontSize:12,color:"#a78bfa"}}>Saves to: <strong>{exams.find(e=>e.id===selectedExamId)?.name||"— select an exam after import —"}</strong></div>
+                <div style={{fontSize:11,color:"#475569",marginTop:3}}>Uses currently selected exam</div>
+              </button>
+            </div>
+            <div style={{padding:"0 24px 20px",display:"flex",justifyContent:"flex-end"}}>
+              <button onClick={()=>{setCsvDestModal(false);setPendingCsvFile(null);}}
+                style={{padding:"7px 18px",borderRadius:8,background:"#1e293b",border:"1px solid #334155",color:"#94a3b8",cursor:"pointer",fontSize:13}}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Move Marks Modal ──────────────────────────────────────────────── */}
+      {moveModal && (
+        <div style={{position:"fixed",inset:0,zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16,background:"rgba(0,0,0,0.75)",backdropFilter:"blur(4px)"}}
+          onClick={()=>setMoveModal(false)}>
+          <div style={{background:"#0d1829",border:"1px solid #1e3a5f",borderRadius:16,width:"100%",maxWidth:480,boxShadow:"0 25px 60px rgba(0,0,0,0.7)"}}
+            onClick={e=>e.stopPropagation()}>
+            <div style={{padding:"20px 24px 14px",borderBottom:"1px solid #1e293b"}}>
+              <h3 style={{margin:0,fontSize:17,fontWeight:700,color:"#f1f5f9"}}>↗ Move Marks</h3>
+              <p style={{margin:"5px 0 0",fontSize:12,color:"#64748b"}}>
+                Copy marks for <strong style={{color:"#60a5fa"}}>{selectedRows.size} student{selectedRows.size!==1?"s":""}</strong> to a different class or subject.
+              </p>
+            </div>
+            <div style={{padding:"20px 24px",display:"flex",flexDirection:"column",gap:14}}>
+              <div>
+                <label style={{fontSize:12,color:"#94a3b8",display:"block",marginBottom:5,fontWeight:600}}>DESTINATION CLASS</label>
+                <div style={{display:"flex",gap:8}}>
+                  <select value={moveDest.grade} onChange={e=>setMoveDest(d=>({...d,grade:e.target.value,section:""}))}
+                    style={{flex:1,padding:"8px 10px",borderRadius:8,background:"#1e293b",border:"1px solid #334155",color:"#e2e8f0",fontSize:13}}>
+                    <option value="">— Grade —</option>
+                    {[...new Set((state?.classes||[]).map(c=>String(c.name).replace(/[^0-9]/g,"")))].filter(Boolean).sort((a,b)=>+a-+b).map(g=>(
+                      <option key={g} value={g}>Grade {g}</option>
+                    ))}
+                  </select>
+                  <select value={moveDest.section} onChange={e=>setMoveDest(d=>({...d,section:e.target.value}))}
+                    style={{flex:1,padding:"8px 10px",borderRadius:8,background:"#1e293b",border:"1px solid #334155",color:"#e2e8f0",fontSize:13}}>
+                    <option value="">— Section —</option>
+                    {(state?.classes||[]).filter(c=>String(c.name).replace(/[^0-9]/g,"")===(moveDest.grade||selectedGrade)).map(c=>(
+                      <option key={c.id} value={c.section}>{c.section}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label style={{fontSize:12,color:"#94a3b8",display:"block",marginBottom:5,fontWeight:600}}>DESTINATION SUBJECT <span style={{color:"#475569",fontWeight:400}}>(optional)</span></label>
+                <select value={moveDest.subjectId} onChange={e=>setMoveDest(d=>({...d,subjectId:e.target.value}))}
+                  style={{width:"100%",padding:"8px 10px",borderRadius:8,background:"#1e293b",border:"1px solid #334155",color:"#e2e8f0",fontSize:13}}>
+                  <option value="">— Keep same subjects —</option>
+                  {(()=>{
+                    const destClass=(state?.classes||[]).find(c=>String(c.name).replace(/[^0-9]/g,"")===(moveDest.grade||selectedGrade)&&c.section===(moveDest.section||selectedClass));
+                    if(!destClass) return null;
+                    return (state?.subjects||[]).filter(s=>s.classIds.includes(destClass.id)).map(s=>(
+                      <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
+                    ));
+                  })()}
+                </select>
+              </div>
+              <div style={{background:"#1e293b",borderRadius:8,padding:"10px 14px",fontSize:12,color:"#64748b"}}>
+                ℹ️ Marks will be <strong style={{color:"#f1f5f9"}}>copied</strong> to the destination. Original marks are preserved. Students are matched by name or admission number.
+              </div>
+            </div>
+            <div style={{padding:"0 24px 20px",display:"flex",gap:10,justifyContent:"flex-end"}}>
+              <button onClick={()=>setMoveModal(false)}
+                style={{padding:"8px 18px",borderRadius:8,background:"#1e293b",border:"1px solid #334155",color:"#94a3b8",cursor:"pointer",fontSize:13}}>
+                Cancel
+              </button>
+              <button onClick={()=>{
+                const destGrade=moveDest.grade||selectedGrade;
+                const destSection=moveDest.section||selectedClass;
+                const destClass=(state?.classes||[]).find(c=>String(c.name).replace(/[^0-9]/g,"")===(destGrade)&&c.section===destSection);
+                if(!destClass){alert("Destination class not found.");return;}
+                const destStudents=(state?.students||[]).filter(s=>s.classId===destClass.id);
+                if(!destStudents.length){alert("No students in destination class.");return;}
+                const selectedStudentsList=students.filter(s=>selectedRows.has(s.id));
+                let moved=0;
+                if(examMode==="exam"&&selectedExamId){
+                  const newRecs=[];
+                  selectedStudentsList.forEach(src=>{
+                    const dest=destStudents.find(d=>d.name===src.name||(d.rollNo&&d.rollNo===src.admNo));
+                    if(!dest) return;
+                    allSubjects.forEach(sub=>{
+                      const val=src.marks[sub.id];
+                      if(!val||val==="") return;
+                      const targetSubId=moveDest.subjectId||sub.id;
+                      newRecs.push({id:`${selectedExamId}_${dest.id}_${targetSubId}`,examId:selectedExamId,studentId:dest.id,subjectId:targetSubId,marks:Number(val)||0});
+                    });
+                    moved++;
+                  });
+                  if(newRecs.length) setState(s=>({...s,examRecords:[...s.examRecords.filter(r=>!newRecs.some(n=>n.id===r.id)),...newRecs]}));
+                } else {
+                  const monthPrefix=`monthly_${selectedMonth}_`;
+                  setState(s=>({...s,students:s.students.map(dest=>{
+                    if(dest.classId!==destClass.id) return dest;
+                    const src=selectedStudentsList.find(x=>x.name===dest.name||(dest.rollNo&&dest.rollNo===x.admNo));
+                    if(!src) return dest;
+                    moved++;
+                    const updMarks={...dest.marks};
+                    allSubjects.forEach(sub=>{
+                      const val=src.marks[sub.id];
+                      if(!val||val==="") return;
+                      const targetSubId=moveDest.subjectId||sub.id;
+                      updMarks[monthPrefix+targetSubId]=Number(val)||0;
+                    });
+                    return {...dest,marks:updMarks};
+                  })}));
+                }
+                setMoveModal(false);
+                setSelectedRows(new Set());
+                setMoveDest({grade:"",section:"",subjectId:""});
+                alert(`✓ Marks copied for ${moved} student(s) to Grade ${destGrade}${destSection}.`);
+              }}
+                style={{padding:"8px 20px",borderRadius:8,background:"#16a34a",border:"none",color:"#fff",cursor:"pointer",fontWeight:600,fontSize:13}}>
+                ↗ Move Marks
+              </button>
             </div>
           </div>
         </div>
