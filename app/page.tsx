@@ -220,7 +220,7 @@ interface TeacherProfile { dob?:string; gender?:string; address?:string; phone?:
 // PHASE 1: Subject categories
 type SubjectCategory = "Arts" | "Science" | "Commerce" | "General";
 
-interface Student { id:string; name:string; rollNo:string; classId:string; photo:string; marks:Record<string,number>; password:string; email?:string; profile?:StudentProfile; status?:"pending"|"approved"; csvOrder?:number; }
+interface Student { id:string; name:string; rollNo:string; classId:string; photo:string; marks:Record<string,number>; password:string; email?:string; profile?:StudentProfile; status?:"pending"|"approved"; csvOrder?:number; gender?:"M"|"F"; }
 // PHASE 2: is_counselor, is_bursar roles on Teacher
 interface Teacher { id:string; name:string; email:string; subjectIds:string[]; classIds:string[]; password:string; photo?:string; profile?:TeacherProfile; status?:"pending"|"approved"; is_counselor?:boolean; is_bursar?:boolean; }
 // PHASE 1: category on Subject
@@ -2313,7 +2313,9 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
     const ns:Student[]=rows.map((r,i)=>{
       if(!r.name||!r.rollno) return null;
       const cid=state.classes.find(c=>c.name===r.class&&c.section===r.section)?.id||state.classes[0]?.id||"";
-      return{id:uid(),name:r.name,rollNo:r.rollno,classId:cid,csvOrder:maxOrder+i+1,
+      const gRaw=(r.gender||"").trim();
+      const gender: "M"|"F" = (gRaw==="Female"||gRaw==="F"||gRaw==="female") ? "F" : "M";
+      return{id:uid(),name:r.name,rollNo:r.rollno,classId:cid,csvOrder:maxOrder+i+1,gender,
         photo:`https://api.dicebear.com/7.x/avataaars/svg?seed=${r.name}`,marks:{},password:r.password||"changeme",
         profile:encProfile({dob:r.dob||"",gender:r.gender||"",phone:r.phone||"",address:r.address||"",parentName:r.parent_name||"",parentPhone:r.parent_phone||"",bloodGroup:r.blood_group||"",nic:""})} as Student;
     }).filter(Boolean) as Student[];
@@ -8129,11 +8131,15 @@ export default function SchoolERP() {
     if (!profile) {
       try { const p = localStorage.getItem(`student_profile_${r.id}`); if(p) profile = JSON.parse(p); } catch {}
     }
+    const dec = decProfile(profile);
+    const gRaw = dec.gender || "";
+    const gender: "M"|"F" = (gRaw==="Female"||gRaw==="F") ? "F" : "M";
     return { id: r.id, name: r.name, rollNo: r.roll_no, classId: r.class_id,
       photo: r.photo || `https://api.dicebear.com/7.x/avataaars/svg?seed=${r.name}`,
       marks: r.marks || {}, password: r.password || "changeme",
       status: r.status || undefined,
       csvOrder: r.csv_order ?? undefined,
+      gender,
       profile };
   }
   function dbToTeacher(r: any): Teacher {
@@ -8186,7 +8192,11 @@ export default function SchoolERP() {
       }); } catch(e) { console.warn("[db.addStudent]", e); }
     },
     async updateStudent(s) {
-      update(st => ({ ...st, students: st.students.map(x => x.id === s.id ? s : x) }));
+      const dec = decProfile(s.profile);
+      const gRaw = dec.gender || "";
+      const gender: "M"|"F" = (gRaw==="Female"||gRaw==="F") ? "F" : "M";
+      const updated = {...s, gender};
+      update(st => ({ ...st, students: st.students.map(x => x.id === s.id ? updated : x) }));
       try { await sb.update("students", s.id, {
         name: s.name, roll_no: s.rollNo, class_id: s.classId,
         photo: s.photo, marks: s.marks, password: s.password,

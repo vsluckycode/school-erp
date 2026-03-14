@@ -363,13 +363,11 @@ export default function MarksEntry({ db, user, state, setState, exams: examsProp
       allSubjects.forEach(sub=>{
         marks[sub.id] = String(rawMarks[sub.id]||rawMarks[sub.code]||"");
       });
-      // Gender: stored in profile (encrypted) or directly
+      // Gender: read directly from student.gender field (set by page.tsx from decrypted profile)
       const gRaw = st.gender||"";
-      const gProfile = st.profile?.gender||"";
       let gender = "M";
-      if (gRaw==="M"||gRaw==="F") { gender=gRaw; }
-      else if (gProfile==="Male"||gProfile==="M") { gender="M"; }
-      else if (gProfile==="Female"||gProfile==="F") { gender="F"; }
+      if (gRaw==="F") { gender="F"; }
+      else if (gRaw==="M") { gender="M"; }
       return {
         id: st.id,
         admNo: st.rollNo||st.adm_no||"",
