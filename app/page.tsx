@@ -227,7 +227,7 @@ interface Teacher { id:string; name:string; email:string; subjectIds:string[]; c
 interface Subject { id:string; name:string; code:string; classIds:string[]; teacherIds:string[]; category?:SubjectCategory; }
 interface Class   { id:string; name:string; section:string; teacherId:string }
 interface TimetableSlot { day:string; period:number; subjectId:string; teacherId:string }
-interface SchoolSettings { name:string; tagline:string; logoUrl:string; blogUrl:string; currency:string; pwAdmin:string; pwCounselor:string; pwStaff:string; pwExam:string; siteTitle:string; }
+interface SchoolSettings { name:string; tagline:string; logoUrl:string; blogUrl:string; currency:string; pwAdmin:string; pwCounselor:string; pwStaff:string; pwExam:string; siteTitle:string; adminUsername:string; }
 interface SupportAdmin   { id:string; name:string; email:string; password:string; }
 
 // ─── CMS / Public Website Types ──────────────────────────────────────────────
@@ -346,7 +346,7 @@ const saveLogo = (url: string) => {
 const BLOOD_GROUPS = ["A+","A-","B+","B-","AB+","AB-","O+","O-"];
 
 const INITIAL: AppState = {
-  settings: { name:"Bakamuna Mahasen National School", tagline:"Excellence in Education", logoUrl:getSavedLogo(), blogUrl:"https://bakamuna.edu.lk/blog", currency:"LKR", pwAdmin:"admin123", pwCounselor:"couns789", pwStaff:"staff456", pwExam:"exam123", siteTitle:"Bakamuna Mahasen National School" },
+  settings: { name:"Bakamuna Mahasen National School", tagline:"Excellence in Education", logoUrl:getSavedLogo(), blogUrl:"https://bakamuna.edu.lk/blog", currency:"LKR", pwAdmin:"admin123", pwCounselor:"couns789", pwStaff:"staff456", pwExam:"exam123", siteTitle:"Bakamuna Mahasen National School", adminUsername:"admin" },
   classes: [
     { id:"c1", name:"9",  section:"A", teacherId:"t1" },
     { id:"c2", name:"10", section:"B", teacherId:"t2" },
@@ -813,7 +813,197 @@ function downloadResultPDF(student:Student, state:AppState) {
   if(win){ win.onload=()=>{ win.print(); setTimeout(()=>URL.revokeObjectURL(url),2000); }; }
 }
 
-// ─── Teacher Timetable PDF Export ─────────────────────────────────────────────
+// ─── All Classes Analysis Export ──────────────────────────────────────────────
+function exportAllClassesAnalysis(state:AppState, examId?:string){
+  const schoolName = state.settings.name;
+  const schoolTagline = state.settings.tagline;
+  const examLabel = examId
+    ? (state.exams.find(e=>e.id===examId)?.name + " (" + state.exams.find(e=>e.id===examId)?.year + ")")
+    : "Term Marks";
+  const date = new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"long",year:"numeric"});
+
+  // Helper: get mark for a student+subject
+  const getMark=(st:Student, subId:string): number|undefined => {
+    if(examId){
+      return state.examRecords.find(r=>r.examId===examId&&r.studentId===st.id&&r.subjectId===subId)?.marks;
+    }
+    return st.marks[subId];
+  };
+
+  const gradeOf=(m:number|undefined)=>{
+    if(m===undefined) return "–";
+    if(m>=75) return "A"; if(m>=65) return "B"; if(m>=55) return "C";
+    if(m>=40) return "S"; return "W";
+  };
+  const gradeCol=(g:string)=>{
+    if(g==="A") return "#059669"; if(g==="B") return "#2563eb";
+    if(g==="C") return "#d97706"; if(g==="S") return "#ea580c"; if(g==="W") return "#dc2626";
+    return "#94a3b8";
+  };
+
+  // Sort classes
+  const classes = [...state.classes].sort((a,b)=>{
+    const na=parseInt(a.name)||0, nb=parseInt(b.name)||0;
+    if(na!==nb) return na-nb;
+    return a.section.localeCompare(b.section);
+  });
+
+  let classBlocks = "";
+
+  classes.forEach(cls=>{
+    const subjects = state.subjects.filter(s=>s.classIds.includes(cls.id));
+    const students = state.students.filter(s=>s.classId===cls.id&&s.status!=="pending");
+    if(!students.length) return;
+
+    // Compute per-student totals for ranking
+    const withTotals = students.map(st=>{
+      const marks = subjects.map(sub=>getMark(st,sub.id));
+      const valid = marks.filter(m=>m!==undefined) as number[];
+      const total = valid.reduce((a,b)=>a+b,0);
+      const avg = valid.length ? Math.round((total/valid.length)*10)/10 : 0;
+      return {st, marks, total, avg, grade:gradeOf(avg)};
+    }).sort((a,b)=>b.total-a.total);
+
+    // Subject averages
+    const subAvgs = subjects.map(sub=>{
+      const vals = students.map(st=>getMark(st,sub.id)).filter(m=>m!==undefined) as number[];
+      const avg = vals.length ? Math.round(vals.reduce((a,b)=>a+b,0)/vals.length*10)/10 : 0;
+      const pass = vals.filter(m=>m>=40).length;
+      const fail = vals.filter(m=>m<40).length;
+      return {sub, avg, pass, fail, total:vals.length};
+    });
+
+    // Grade distribution
+    const gradeDist:{[k:string]:number} = {A:0,B:0,C:0,S:0,W:0};
+    withTotals.forEach(r=>{ if(r.grade in gradeDist) gradeDist[r.grade]++; });
+    const classTeacher = state.teachers.find(t=>t.id===cls.teacherId);
+    const classAvg = withTotals.length ? Math.round(withTotals.reduce((a,b)=>a+b.avg,0)/withTotals.length*10)/10 : 0;
+    const passCount = withTotals.filter(r=>r.avg>=40).length;
+
+    // Student rows
+    const stuRows = withTotals.map((r,i)=>`
+      <tr style="background:${i%2?"#f8fafc":"#fff"}">
+        <td style="padding:7px 10px;font-weight:700;color:#64748b;text-align:center">${i+1}</td>
+        <td style="padding:7px 10px;font-family:monospace;font-size:12px;color:#475569">${r.st.rollNo}</td>
+        <td style="padding:7px 10px;font-weight:600">${r.st.name}</td>
+        <td style="padding:7px 10px;text-align:center;color:${r.st.gender==="F"?"#db2777":"#2563eb"}">${r.st.gender||"M"}</td>
+        ${subjects.map(sub=>{
+          const m=getMark(r.st,sub.id);
+          const g=gradeOf(m);
+          return `<td style="padding:7px 10px;text-align:center;font-weight:700;color:${gradeCol(g)}">${m??'–'}</td>`;
+        }).join("")}
+        <td style="padding:7px 10px;text-align:center;font-weight:800;color:#1e40af">${r.total}</td>
+        <td style="padding:7px 10px;text-align:center;color:#0891b2">${r.avg}%</td>
+        <td style="padding:7px 10px;text-align:center;font-weight:800;font-size:15px;color:${gradeCol(r.grade)}">${r.grade}</td>
+        <td style="padding:7px 10px;text-align:center;font-weight:700;color:#d97706">#${i+1}</td>
+      </tr>`).join("");
+
+    // Subject avg row
+    const subAvgRow = `<tr style="background:#eff6ff;font-weight:700">
+      <td colspan="4" style="padding:7px 10px;color:#1e40af;font-size:11px;text-transform:uppercase;letter-spacing:1px">Subject Average</td>
+      ${subAvgs.map(s=>`<td style="padding:7px 10px;text-align:center;color:${s.avg>=75?"#059669":s.avg>=40?"#d97706":"#dc2626"};font-size:13px">${s.avg}</td>`).join("")}
+      <td colspan="4"></td></tr>`;
+
+    // Pass/fail row
+    const passRow = `<tr style="background:#f0fdf4">
+      <td colspan="4" style="padding:5px 10px;color:#15803d;font-size:11px;text-transform:uppercase;letter-spacing:1px">Pass / Fail</td>
+      ${subAvgs.map(s=>`<td style="padding:5px 10px;text-align:center;font-size:11px"><span style="color:#15803d">${s.pass}P</span> / <span style="color:#dc2626">${s.fail}F</span></td>`).join("")}
+      <td colspan="4"></td></tr>`;
+
+    // Grade dist pills
+    const distPills = Object.entries(gradeDist).map(([g,n])=>
+      `<span style="background:${gradeCol(g)}22;color:${gradeCol(g)};border:1px solid ${gradeCol(g)}44;padding:3px 10px;border-radius:20px;font-weight:700;font-size:12px">${g}: ${n}</span>`
+    ).join("");
+
+    classBlocks += `
+    <div style="margin-bottom:48px;page-break-inside:avoid">
+      <div style="background:linear-gradient(135deg,#1e3a8a,#1e40af);color:#fff;padding:16px 20px;border-radius:10px 10px 0 0;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <div>
+          <div style="font-size:20px;font-weight:800;letter-spacing:1px">Class ${cls.name} – ${cls.section}</div>
+          <div style="font-size:12px;opacity:0.75;margin-top:2px">Class Teacher: ${classTeacher?.name||"Unassigned"} · ${students.length} Students · ${subjects.length} Subjects</div>
+        </div>
+        <div style="display:flex;gap:12px;align-items:center">
+          <div style="text-align:center"><div style="font-size:22px;font-weight:800">${classAvg}%</div><div style="font-size:10px;opacity:0.7">Class Avg</div></div>
+          <div style="text-align:center"><div style="font-size:22px;font-weight:800">${passCount}/${students.length}</div><div style="font-size:10px;opacity:0.7">Passed</div></div>
+          <div style="text-align:center"><div style="font-size:22px;font-weight:800">${gradeOf(classAvg)}</div><div style="font-size:10px;opacity:0.7">Grade</div></div>
+        </div>
+      </div>
+      <div style="padding:10px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-top:none;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <span style="font-size:11px;color:#64748b;font-weight:600">Grade Distribution:</span>
+        ${distPills}
+      </div>
+      <div style="overflow-x:auto;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 10px 10px">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead>
+            <tr style="background:#1e3a8a;color:#fff">
+              <th style="padding:10px;text-align:center;font-size:11px">#</th>
+              <th style="padding:10px;font-size:11px">Roll No</th>
+              <th style="padding:10px;font-size:11px">Name</th>
+              <th style="padding:10px;text-align:center;font-size:11px">M/F</th>
+              ${subjects.map(s=>`<th style="padding:10px;text-align:center;font-size:11px;min-width:52px">${s.code}</th>`).join("")}
+              <th style="padding:10px;text-align:center;font-size:11px">Total</th>
+              <th style="padding:10px;text-align:center;font-size:11px">Avg</th>
+              <th style="padding:10px;text-align:center;font-size:11px">Grade</th>
+              <th style="padding:10px;text-align:center;font-size:11px">Rank</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${stuRows}
+            ${subAvgRow}
+            ${passRow}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+  });
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+  <title>All Classes Analysis — ${schoolName}</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:'Segoe UI',Arial,sans-serif;background:#f1f5f9;color:#0f172a;padding:32px}
+    .cover{text-align:center;padding:48px 32px;background:linear-gradient(135deg,#0f172a,#1e3a8a);color:#fff;border-radius:16px;margin-bottom:40px}
+    .cover h1{font-size:32px;font-weight:800;letter-spacing:2px}
+    .cover p{opacity:0.7;margin-top:8px;font-size:14px}
+    .cover .meta{margin-top:20px;display:flex;gap:32px;justify-content:center;flex-wrap:wrap}
+    .cover .meta-item{text-align:center}
+    .cover .meta-item .val{font-size:28px;font-weight:800}
+    .cover .meta-item .lbl{font-size:11px;opacity:0.6;text-transform:uppercase;letter-spacing:1px}
+    .report-title{font-size:15px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px 20px;display:inline-block;margin-bottom:32px;color:#1e40af;font-weight:700}
+    @media print{
+      body{background:#fff;padding:16px}
+      .cover{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+      thead{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+      .page-break{page-break-before:always}
+    }
+  </style>
+  </head><body>
+  <div class="cover">
+    <h1>${schoolName.toUpperCase()}</h1>
+    <p>${schoolTagline}</p>
+    <div class="meta">
+      <div class="meta-item"><div class="val">${classes.length}</div><div class="lbl">Classes</div></div>
+      <div class="meta-item"><div class="val">${state.students.filter(s=>s.status!=="pending").length}</div><div class="lbl">Students</div></div>
+      <div class="meta-item"><div class="val">${state.subjects.length}</div><div class="lbl">Subjects</div></div>
+    </div>
+  </div>
+  <div style="text-align:center;margin-bottom:32px">
+    <div class="report-title">📊 All Classes Analysis Report — ${examLabel}</div>
+    <div style="font-size:12px;color:#64748b;margin-top:6px">Generated on ${date}</div>
+  </div>
+  ${classBlocks}
+  <div style="text-align:center;margin-top:40px;padding-top:20px;border-top:1px solid #e2e8f0;font-size:12px;color:#94a3b8">
+    ${schoolName} · All Classes Analysis · ${examLabel} · ${date}
+  </div>
+  </body></html>`;
+
+  const blob = new Blob([html],{type:"text/html"});
+  const url = URL.createObjectURL(blob);
+  const win = window.open(url,"_blank");
+  if(win){ win.onload=()=>{ win.print(); setTimeout(()=>URL.revokeObjectURL(url),3000); }; }
+}
+
+
 function downloadTeacherTimetablePDF(teacher:Teacher, state:AppState){
   const rows = DAYS.map(day=>{
     const slots = PERIODS.map(p=>{
@@ -1443,8 +1633,8 @@ function LoginScreen({state,db,onLogin,onRegister,onBack}:{state:AppState;db:DbO
             return;
           }
         }
-        // 2. Fallback: hardcoded master admin (username: admin, password from settings)
-        if(id==="admin" && pass===state.settings.pwAdmin){
+        // 2. Fallback: master admin (username + password from settings)
+        if(id===state.settings.adminUsername && pass===state.settings.pwAdmin){
           onLogin({role:"admin",id:"admin",name:"Administrator"});
         } else {
           setError("Invalid admin credentials");
@@ -2392,7 +2582,13 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
 
       case "dashboard": return(
         <div className="space-y-6">
-          <h2 className="text-xl font-bold text-white">Admin Dashboard</h2>
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <h2 className="text-xl font-bold text-white">Admin Dashboard</h2>
+            <button onClick={()=>exportAllClassesAnalysis(state, dashExam==="__term__"?undefined:dashExam)}
+              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm px-4 py-2 rounded-lg transition-colors shadow-lg shadow-emerald-500/20">
+              <Download size={14}/>Export All Classes Analysis
+            </button>
+          </div>
 
           {/* ── Pending Approvals Banner ── */}
           {(()=>{
@@ -6103,8 +6299,16 @@ function SecurityCenter({state,setState}:{state:AppState;setState:(fn:(s:AppStat
   const [labPws,setLabPws]=useState<Record<string,string>>(
     Object.fromEntries(state.inventory.labs.map(l=>[l.id,l.password]))
   );
+  const [newUsername,setNewUsername]=useState(state.settings.adminUsername||"admin");
+  const [usernameSaved,setUsernameSaved]=useState(false);
 
   function toggleShow(k:string){setShow(s=>({...s,[k]:!s[k]}));}
+
+  function saveAdminUsername(){
+    if(!newUsername.trim()||newUsername.trim().length<3) return;
+    setState(s=>({...s,settings:{...s.settings,adminUsername:newUsername.trim()}}));
+    setUsernameSaved(true); setTimeout(()=>setUsernameSaved(false),2000);
+  }
 
   function saveSystemPw(key:"pwAdmin"|"pwCounselor"|"pwStaff"|"pwExam",val:string){
     if(!val.trim()) return;
@@ -6130,7 +6334,30 @@ function SecurityCenter({state,setState}:{state:AppState;setState:(fn:(s:AppStat
     <div className="space-y-5">
       <div className="flex items-center gap-3 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3">
         <Shield size={16} className="text-red-400 flex-shrink-0"/>
-        <p className="text-red-400/80 text-xs">Password changes take effect immediately. Keep a secure record of all passwords.</p>
+        <p className="text-red-400/80 text-xs">Password and username changes take effect immediately. Keep a secure record of all credentials.</p>
+      </div>
+
+      {/* Admin Username */}
+      <div className="bg-[#080D18] border border-white/5 rounded-2xl p-5 space-y-4">
+        <h3 className="text-white/60 text-xs font-semibold uppercase tracking-wider flex items-center gap-2"><User size={13}/>Admin Login Username</h3>
+        <div className="space-y-2">
+          <div className="text-xs text-white/40">Current username: <span className="font-mono text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded">{state.settings.adminUsername||"admin"}</span></div>
+          <div className="flex gap-2">
+            <input
+              value={newUsername}
+              onChange={e=>setNewUsername(e.target.value)}
+              placeholder="New username (min 3 chars)"
+              className="flex-1 bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 placeholder-white/20 font-mono"
+            />
+            <button
+              onClick={saveAdminUsername}
+              disabled={!newUsername.trim()||newUsername.trim().length<3||newUsername.trim()===(state.settings.adminUsername||"admin")}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm px-4 py-2.5 rounded-xl transition-colors font-medium">
+              {usernameSaved?<><Check size={13}/>Saved!</>:<><Save size={13}/>Save</>}
+            </button>
+          </div>
+          <p className="text-xs text-white/25">This is the username used on the Admin login screen. Min 3 characters.</p>
+        </div>
       </div>
 
       {/* System passwords */}
@@ -7934,10 +8161,24 @@ export default function SchoolERP() {
       const savedLogo   = localStorage.getItem("school_logo") || "";
       // Settings backup: tiny key written on every change, quota-safe fallback
       const settingsBak = localStorage.getItem("erp_settings_bak");
+      // Helper to safely decrypt a password field from backup
+      const decBakPw = (val:string, fallback:string) => {
+        if(!val) return fallback;
+        try { const d=decPII(val); return d||fallback; } catch { return val||fallback; }
+      };
+      const mergeBak = (bak:any, base:SchoolSettings): SchoolSettings => ({
+        ...base, ...bak,
+        pwAdmin:      decBakPw(bak.pwAdmin,     base.pwAdmin),
+        pwCounselor:  decBakPw(bak.pwCounselor, base.pwCounselor),
+        pwStaff:      decBakPw(bak.pwStaff,     base.pwStaff),
+        pwExam:       decBakPw(bak.pwExam,      base.pwExam),
+        adminUsername: bak.adminUsername || base.adminUsername || "admin",
+      });
       if (saved) {
         const parsed = JSON.parse(saved) as AppState;
-        const ms: SchoolSettings = settingsBak
-          ? { ...INITIAL.settings, ...JSON.parse(settingsBak), ...parsed.settings }
+        const bak = settingsBak ? JSON.parse(settingsBak) : null;
+        const ms: SchoolSettings = bak
+          ? mergeBak(bak, {...INITIAL.settings, ...parsed.settings})
           : { ...INITIAL.settings, ...parsed.settings };
         ms.logoUrl = savedLogo || ms.logoUrl || "";
         return { ...INITIAL, ...parsed,
@@ -7956,7 +8197,7 @@ export default function SchoolERP() {
         };
       }
       const fallback: SchoolSettings = settingsBak
-        ? { ...INITIAL.settings, ...JSON.parse(settingsBak), logoUrl: savedLogo }
+        ? mergeBak(JSON.parse(settingsBak), {...INITIAL.settings, logoUrl: savedLogo})
         : { ...INITIAL.settings, logoUrl: savedLogo };
       return { ...INITIAL, settings: fallback };
     } catch {}
@@ -7981,7 +8222,16 @@ export default function SchoolERP() {
         else localStorage.removeItem("school_logo");
       } catch {}
       // 2. Settings backup — tiny JSON without logo, never hits quota, used as reload fallback
-      try { localStorage.setItem("erp_settings_bak", JSON.stringify({...next.settings, logoUrl:""})); } catch {}
+      try {
+        localStorage.setItem("erp_settings_bak", JSON.stringify({
+          ...next.settings,
+          logoUrl:"",
+          pwAdmin:     encPII(next.settings.pwAdmin),
+          pwCounselor: encPII(next.settings.pwCounselor),
+          pwStaff:     encPII(next.settings.pwStaff),
+          pwExam:      encPII(next.settings.pwExam),
+        }));
+      } catch {}
       // 3. Full state — strip base64 logo + keep media (media with base64 saved separately)
       try {
         const toSave = {
@@ -8009,7 +8259,16 @@ export default function SchoolERP() {
           timetable:   next.timetable,
           exams:       next.exams,
           examRecords: next.examRecords,
-          settings:  { ...next.settings, logoUrl: next.settings.logoUrl?.startsWith("data:") ? "" : (next.settings.logoUrl || "") },
+          settings: {
+            ...next.settings,
+            logoUrl:     next.settings.logoUrl?.startsWith("data:") ? "" : (next.settings.logoUrl || ""),
+            // Store passwords encrypted so they persist across browsers
+            pwAdmin:      encPII(next.settings.pwAdmin),
+            pwCounselor:  encPII(next.settings.pwCounselor),
+            pwStaff:      encPII(next.settings.pwStaff),
+            pwExam:       encPII(next.settings.pwExam),
+            adminUsername: next.settings.adminUsername || "admin",
+          },
         });
         // Save CMS separately — strip base64 media (too large for jsonb), keep URL-only items
         const cmsForDb = {
@@ -8085,10 +8344,13 @@ export default function SchoolERP() {
         settings:  config?.settings  ? {
           ...prev.settings,
           ...config.settings,
-          logoUrl:      prev.settings.logoUrl,       // logo is local-only (stripped from config)
-          pwAdmin:      prev.settings.pwAdmin,       // passwords are local-only
-          pwCounselor:  prev.settings.pwCounselor,
-          pwStaff:      prev.settings.pwStaff,
+          logoUrl:       prev.settings.logoUrl,  // logo is local-only (stripped from config)
+          // Decrypt passwords from Supabase — fall back to local if not in DB yet
+          pwAdmin:      config.settings.pwAdmin      ? decPII(config.settings.pwAdmin)      : prev.settings.pwAdmin,
+          pwCounselor:  config.settings.pwCounselor  ? decPII(config.settings.pwCounselor)  : prev.settings.pwCounselor,
+          pwStaff:      config.settings.pwStaff      ? decPII(config.settings.pwStaff)      : prev.settings.pwStaff,
+          pwExam:       config.settings.pwExam       ? decPII(config.settings.pwExam)       : prev.settings.pwExam,
+          adminUsername: config.settings.adminUsername || prev.settings.adminUsername || "admin",
         } : prev.settings,
         // CMS: merge Supabase cms with localStorage cms
         // For media: Supabase has url="" for base64 items — restore url from localStorage version
