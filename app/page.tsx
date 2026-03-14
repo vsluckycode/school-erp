@@ -111,6 +111,25 @@ const sb = {
     return true;
   },
 
+  // ─── Upload file to Supabase Storage, returns public URL ─────────────────
+  async uploadFile(bucket: string, file: File, path?: string): Promise<string | null> {
+    if (!this.isConfigured()) return null;
+    const safeName = file.name.replace(/[^a-zA-Z0-9._\-]/g, "_");
+    const filePath = path ? `${path}/${safeName}` : safeName;
+    const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${bucket}/${filePath}`, {
+      method: "POST",
+      headers: {
+        "apikey": SUPABASE_ANON,
+        "Authorization": `Bearer ${SUPABASE_ANON}`,
+        "Content-Type": file.type || "application/octet-stream",
+        "x-upsert": "true",
+      },
+      body: file,
+    });
+    if (!res.ok) { console.error(`[sb.uploadFile]`, await res.text()); return null; }
+    return `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${filePath}`;
+  },
+
   // ─── Save/load the entire shared config (subjects, classes, timetable, settings)
   // Uses a single row in app_config table: { id: 'main', data: jsonb }
   // SQL to create:  create table if not exists app_config (id text primary key, data jsonb);
@@ -6122,10 +6141,18 @@ function DownloadsManager({state,setState}:{state:AppState;setState:(fn:(s:AppSt
     upd(c=>({...c,media:[...c.media,{id:uid(),name:fileName.trim(),url:urlInput.trim(),type:fileType,size:"—",uploadedAt:today,source:"download" as const,category:selCatId||undefined,classId:selClassId||undefined,subjectId:selSubjectId||undefined,className:clsObj?`${clsObj.name}-${clsObj.section}`:undefined,subjectName:subObj?.name,thumbUrl:thumbUrl||undefined}]}));
     setUrl("");setFName("");setThumbUrl("");setMsg("Added!");setTimeout(()=>setMsg(""),2000);
   }
-  function addFromFile(f:File,url:string){
+  async function addFromFile(f:File){
     const t=f.type.includes("pdf")?"pdf":"image";
     const clsObj2=state.classes.find(x=>x.id===selClassId);
     const subObj2=state.subjects.find(x=>x.id===selSubjectId);
+    setMsg("Uploading…");
+    let url:string;
+    if(sb.isConfigured()){
+      const stored = await sb.uploadFile("downloads", f, today);
+      url = stored || await new Promise<string>(res=>{const r=new FileReader();r.onload=ev=>res(ev.target?.result as string);r.readAsDataURL(f);});
+    } else {
+      url = await new Promise<string>(res=>{const r=new FileReader();r.onload=ev=>res(ev.target?.result as string);r.readAsDataURL(f);});
+    }
     upd(c=>({...c,media:[...c.media,{id:uid(),name:f.name,url,type:t as any,size:`${(f.size/1024).toFixed(1)} KB`,uploadedAt:today,source:"download" as const,category:selCatId||undefined,classId:selClassId||undefined,subjectId:selSubjectId||undefined,className:clsObj2?`${clsObj2.name}-${clsObj2.section}`:undefined,subjectName:subObj2?.name,thumbUrl:thumbUrl||undefined}]}));
     setThumbUrl("");setMsg("Uploaded!");setTimeout(()=>setMsg(""),2000);
   }
@@ -6190,7 +6217,7 @@ function DownloadsManager({state,setState}:{state:AppState;setState:(fn:(s:AppSt
           <label className="flex items-center gap-3 border-2 border-dashed border-white/10 hover:border-blue-500/30 rounded-xl p-6 cursor-pointer transition-colors group">
             <Upload size={20} className="text-white/20 group-hover:text-blue-400"/>
             <span className="text-white/30 text-sm group-hover:text-white/50">Click to upload PDF or image</span>
-            <input type="file" accept="image/*,.pdf" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(!f)return;const r=new FileReader();r.onload=ev=>{addFromFile(f,ev.target?.result as string);};r.readAsDataURL(f);e.target.value="";}}/>
+            <input type="file" accept="image/*,.pdf" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(!f)return;addFromFile(f);e.target.value="";}}/>
           </label>
         ):(
           <div className="space-y-2">
@@ -6204,18 +6231,18 @@ function DownloadsManager({state,setState}:{state:AppState;setState:(fn:(s:AppSt
             </div>
           </div>
         )}
-        {/* Thumbnail upload — optional cover image */}
+        {/* Cover Image — optional thumbnail */}
         <div className="border border-white/8 rounded-xl p-4 space-y-2">
           <div className="flex items-center gap-2">
             <span className="text-xs text-white/40 uppercase tracking-widest font-semibold">Cover Image</span>
             <span className="text-[10px] text-white/20 bg-white/5 px-2 py-0.5 rounded-full">optional</span>
           </div>
-          {thumbUrl ? (
+          {thumbUrl?(
             <div className="flex items-center gap-3">
               <img src={thumbUrl} className="w-20 h-14 object-cover rounded-lg border border-white/10"/>
               <div className="flex-1 min-w-0">
                 <p className="text-xs text-emerald-400 mb-1">✓ Cover image set</p>
-                <p className="text-[11px] text-white/30">Visitors will see this image instead of a file icon. Clicking it downloads the file.</p>
+                <p className="text-[11px] text-white/30">Visitors will see this instead of a file icon. Clicking downloads the file.</p>
               </div>
               <button onClick={()=>setThumbUrl("")} className="text-white/20 hover:text-red-400 flex-shrink-0"><X size={14}/></button>
             </div>
@@ -6233,8 +6260,6 @@ function DownloadsManager({state,setState}:{state:AppState;setState:(fn:(s:AppSt
         </div>
         {msg&&<p className="text-emerald-400 text-xs">{msg}</p>}
       </div>
-
-      {/* Files list */}
       <div className="bg-[#080D18] border border-white/5 rounded-2xl p-5 space-y-3">
         <div className="flex items-center gap-3 flex-wrap">
           <h3 className="text-white/50 text-xs font-semibold uppercase tracking-widest flex-1">Files ({state.cms.media.length})</h3>
@@ -7449,7 +7474,7 @@ function PageDownloads({cms,state,T}:{cms:CMS;state?:AppState;T:LangT}){
                     {dlMedia.filter(m=>!m.category).map(m=>(
                       <a key={m.id} href={m.url} target="_blank" rel="noopener noreferrer" download
                         className="group block rounded-2xl border border-[#1a2540]/10 hover:border-[#C9A84C]/40 bg-[#1a2540]/5 hover:bg-[#1a2540]/10 overflow-hidden transition-all shadow-sm hover:shadow-md">
-                        {m.thumbUrl ? (
+                        {m.thumbUrl?(
                           <div className="relative overflow-hidden">
                             <img src={m.thumbUrl} alt={m.name} className="w-full h-32 object-cover group-hover:scale-105 transition-transform duration-300"/>
                             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
@@ -7522,8 +7547,7 @@ function PageDownloads({cms,state,T}:{cms:CMS;state?:AppState;T:LangT}){
                     {filteredFiles.map(m=>(
                       <a key={m.id} href={m.url} target="_blank" rel="noopener noreferrer" download
                         className="group block rounded-2xl border border-[#1a2540]/10 hover:border-[#C9A84C]/40 bg-[#1a2540]/5 hover:bg-[#1a2540]/10 overflow-hidden transition-all shadow-sm hover:shadow-md">
-                        {/* Thumbnail or icon */}
-                        {m.thumbUrl ? (
+                        {m.thumbUrl?(
                           <div className="relative overflow-hidden">
                             <img src={m.thumbUrl} alt={m.name} className="w-full h-36 object-cover group-hover:scale-105 transition-transform duration-300"/>
                             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
@@ -7537,7 +7561,6 @@ function PageDownloads({cms,state,T}:{cms:CMS;state?:AppState;T:LangT}){
                             <span className="text-5xl opacity-60">{m.type==="pdf"?"📄":"🖼️"}</span>
                           </div>
                         )}
-                        {/* File info */}
                         <div className="px-4 py-3">
                           <div className="text-[#1a2540] text-sm font-medium truncate">{m.name}</div>
                           <div className="flex items-center justify-between mt-1">

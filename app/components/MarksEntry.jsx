@@ -238,11 +238,8 @@ export default function MarksEntry({ db, user, state, setState, exams: examsProp
 
   const [selectedGrade,   setSelectedGrade]   = useState("6");
   const [selectedClass,   setSelectedClass]   = useState("A");
-  const [examMode,        setExamMode]        = useState("monthly");
-  const [selectedMonth,   setSelectedMonth]   = useState(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
-  });
+  const [examMode,        setExamMode]        = useState("term");
+  const [selectedTerm,    setSelectedTerm]    = useState("Term 1");
   const [selectedExamId,  setSelectedExamId]  = useState("");
   const [academicYear]                        = useState(String(new Date().getFullYear()));
   const [students,        setStudents]        = useState([]);
@@ -267,11 +264,7 @@ export default function MarksEntry({ db, user, state, setState, exams: examsProp
 
   const selectedExam = examMode==="exam"
     ? (exams.find(e=>e.id===selectedExamId)?.name||"")
-    : (() => {
-        const [y,m] = selectedMonth.split("-");
-        const monthName = new Date(Number(y),Number(m)-1,1).toLocaleString("default",{month:"long"});
-        return `${monthName} ${y}`;
-      })();
+    : selectedTerm;
 
   const perms = derivePermissions(user, state, selectedGrade, selectedClass);
 
@@ -333,13 +326,6 @@ export default function MarksEntry({ db, user, state, setState, exams: examsProp
       });
     }
 
-    // 3. Sort by rollNo / admNo
-    stuList = [...stuList].sort((a,b)=>{
-      const na=parseInt(a.rollNo||a.adm_no||"0")||0;
-      const nb=parseInt(b.rollNo||b.adm_no||"0")||0;
-      return na-nb;
-    });
-
     // 4. Map to display shape — resolve marks from examRecords if exam selected
     const marksFromExam = {};
     if (examMode==="exam" && selectedExamId) {
@@ -352,17 +338,10 @@ export default function MarksEntry({ db, user, state, setState, exams: examsProp
     }
 
     const mapped = stuList.map(st=>{
-      let rawMarks = {};
-      if (examMode==="exam" && selectedExamId) {
-        rawMarks = marksFromExam[st.id] || {};
-      } else {
-        // Monthly mode — read month-prefixed keys from student.marks
-        const monthPrefix = `monthly_${selectedMonth}_`;
-        const allM = st.marks || {};
-        Object.keys(allM).forEach(k=>{
-          if (k.startsWith(monthPrefix)) rawMarks[k.replace(monthPrefix,"")] = String(allM[k]);
-        });
-      }
+      // Build marks keyed by subject id
+      const rawMarks = (examMode==="exam"&&selectedExamId)
+        ? (marksFromExam[st.id]||{})
+        : (st.marks||{});
       const marks = {};
       allSubjects.forEach(sub=>{
         marks[sub.id] = String(rawMarks[sub.id]||rawMarks[sub.code]||"");
@@ -648,9 +627,7 @@ export default function MarksEntry({ db, user, state, setState, exams: examsProp
           ]
         }));
       } else {
-        // ── Monthly Test mode: write into student.marks keyed by subjectId ──
-        // Use month-prefixed keys: "monthly_2026-03_subjectId" so months don't overwrite each other
-        const monthPrefix = `monthly_${selectedMonth}_`;
+        // ── Term mode: write into student.marks keyed by subjectId ──────────
         setState(s=>({
           ...s,
           students: s.students.map(st=>{
@@ -661,7 +638,7 @@ export default function MarksEntry({ db, user, state, setState, exams: examsProp
               if (!canEditSubject(sub)) return;
               const raw = local.marks[sub.id];
               if (raw===undefined || raw==="") return;
-              updMarks[monthPrefix+sub.id] = raw==="ab" ? 0 : (Number(raw)||0);
+              updMarks[sub.id] = raw==="ab" ? 0 : (Number(raw)||0);
             });
             return {...st, marks: updMarks};
           })
@@ -774,12 +751,12 @@ export default function MarksEntry({ db, user, state, setState, exams: examsProp
         </div>
       </div>
 
-      {/* MONTHLY TEST / EXAM SELECTOR */}
+      {/* EXAM / TERM SELECTOR */}
       <div style={{background:"#1e293b",borderBottom:"1px solid #334155",padding:"10px 24px",display:"flex",gap:12,alignItems:"center",flexWrap:"wrap"}}>
         <div style={{display:"flex",background:"#0f172a",borderRadius:8,overflow:"hidden",border:"1px solid #334155"}}>
-          <button onClick={()=>setExamMode("monthly")}
-            style={{padding:"6px 14px",border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:examMode==="monthly"?"#3b82f6":"transparent",color:examMode==="monthly"?"#fff":"#64748b"}}>
-            📆 Monthly Test
+          <button onClick={()=>setExamMode("term")}
+            style={{padding:"6px 14px",border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:examMode==="term"?"#3b82f6":"transparent",color:examMode==="term"?"#fff":"#64748b"}}>
+            📅 Term Test
           </button>
           <button onClick={()=>setExamMode("exam")}
             style={{padding:"6px 14px",border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:examMode==="exam"?"#7c3aed":"transparent",color:examMode==="exam"?"#fff":"#64748b"}}>
@@ -787,19 +764,15 @@ export default function MarksEntry({ db, user, state, setState, exams: examsProp
           </button>
         </div>
 
-        {examMode==="monthly" ? (
-          <div style={{display:"flex",gap:8,alignItems:"center"}}>
-            <input
-              type="month"
-              value={selectedMonth}
-              onChange={e=>setSelectedMonth(e.target.value)}
-              style={{padding:"5px 10px",borderRadius:8,background:"#334155",border:"1px solid #475569",color:"#e2e8f0",fontSize:13,colorScheme:"dark"}}
-            />
-            {selectedMonth&&(
-              <span style={{fontSize:12,color:"#60a5fa",background:"#1d3461",padding:"4px 10px",borderRadius:20,border:"1px solid #2563eb44"}}>
-                {selectedExam}
-              </span>
-            )}
+        {examMode==="term" ? (
+          <div style={{display:"flex",gap:6}}>
+            {["Term 1","Term 2","Term 3","Annual"].map(t=>(
+              <button key={t} onClick={()=>setSelectedTerm(t)}
+                style={{padding:"5px 12px",borderRadius:8,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,
+                  background:selectedTerm===t?"#3b82f6":"#334155",color:selectedTerm===t?"#fff":"#94a3b8"}}>
+                {t}
+              </button>
+            ))}
           </div>
         ):(
           <div style={{display:"flex",gap:8,alignItems:"center"}}>
