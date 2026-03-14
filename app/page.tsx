@@ -520,16 +520,12 @@ function sortClasses<T extends{name:string;section:string}>(arr:T[]):T[]{
     return a.name.localeCompare(b.name)||a.section.localeCompare(b.section);
   });
 }
-// Sort students: by class order first, then roll number numerically
+// Keep students in CSV upload order within each class (no roll number sort)
 function sortStudents(students:Student[],classes:Class[]):Student[]{
   const sorted=sortClasses(classes);
   const order=Object.fromEntries(sorted.map((c,i)=>[c.id,i]));
   return [...students].sort((a,b)=>{
-    const co=(order[a.classId]??99)-(order[b.classId]??99);
-    if(co!==0) return co;
-    const ra=parseInt(a.rollNo)||0, rb=parseInt(b.rollNo)||0;
-    if(ra!==rb) return ra-rb;
-    return a.rollNo.localeCompare(b.rollNo);
+    return (order[a.classId]??99)-(order[b.classId]??99);
   });
 }
 
