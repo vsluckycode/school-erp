@@ -217,7 +217,7 @@ interface GalleryItem  { id:string; imageUrl:string; caption:string; category:st
 interface NewsPost     { id:string; title:string; body:string; imageUrl:string; category:"news"|"blog"|"circular"; date:string; author:string; pinned?:boolean; }
 interface Achievement  { id:string; title:string; description:string; imageUrl:string; category:"academic"|"sports"|"aesthetic"; year:string; }
 interface Club         { id:string; name:string; description:string; imageUrl:string; teacher:string; members:number; badge:string; }
-interface MediaFile    { id:string; name:string; url:string; type:"image"|"pdf"; size:string; uploadedAt:string; source?:"download"|"gallery"|"cms"; category?:string; classId?:string; subjectId?:string; className?:string; subjectName?:string; }
+interface MediaFile    { id:string; name:string; url:string; type:"image"|"pdf"; size:string; uploadedAt:string; source?:"download"|"gallery"|"cms"; category?:string; classId?:string; subjectId?:string; className?:string; subjectName?:string; thumbUrl?:string; }
 interface DownloadCategory { id:string; name:string; icon:string; }
 interface PrincipalMsg { text:string; name:string; title:string; photo:string; }
 interface VisionMission{ vision:string; mission:string; history:string; contact:string; address:string; mapEmbed:string; }
@@ -1228,7 +1228,7 @@ function TeacherProfileModal({teacher,state,onSave,onClose,isAdmin=false}:{teach
 }
 
 // ─── Subject Performance Bar Chart (no external lib) ─────────────────────────
-function SubjectChart({state,classId,examId}:{state:AppState;classId:string;examId?:string}) {
+function SubjectChart({state,classId}:{state:AppState;classId:string}) {
   const subjects = state.subjects.filter(s=>s.classIds.includes(classId));
   const students = state.students.filter(s=>s.classId===classId);
   const COLORS   = ["#3b82f6","#8b5cf6","#10b981","#f59e0b","#ef4444","#06b6d4"];
@@ -1236,25 +1236,8 @@ function SubjectChart({state,classId,examId}:{state:AppState;classId:string;exam
   if(!subjects.length||!students.length)
     return<div className="text-center text-white/20 text-sm py-10">No data</div>;
 
-  // Helper: get mark for a student+subject from the right source
-  const getMark = (studentId:string, subjectId:string): number|undefined => {
-    if(examId){
-      const rec = state.examRecords.find(r=>r.examId===examId&&r.studentId===studentId&&r.subjectId===subjectId);
-      return rec?.marks;
-    }
-    const st = students.find(s=>s.id===studentId);
-    return st?.marks[subjectId];
-  };
-
-  const examHasData = examId
-    ? state.examRecords.some(r=>r.examId===examId&&students.some(s=>s.id===r.studentId))
-    : true;
-
-  if(examId&&!examHasData)
-    return<div className="text-center text-white/20 text-sm py-10">No marks recorded for this exam in this class</div>;
-
   const data = subjects.map((sub,i)=>{
-    const marks=students.map(st=>getMark(st.id,sub.id)).filter(m=>m!==undefined) as number[];
+    const marks=students.map(st=>st.marks[sub.id]).filter(m=>m!==undefined) as number[];
     const avg=marks.length?Math.round(marks.reduce((a,b)=>a+b,0)/marks.length):0;
     return{label:sub.code,name:sub.name,avg,color:COLORS[i%COLORS.length]};
   });
@@ -1299,7 +1282,7 @@ function SubjectChart({state,classId,examId}:{state:AppState;classId:string;exam
             </div>
             <div className="flex gap-1">
               {subjects.map((sub,i)=>{
-                const m=getMark(st.id,sub.id);
+                const m=st.marks[sub.id];
                 return(
                   <div key={sub.id} className="flex-1 relative group">
                     <div className="h-2 bg-white/5 rounded-full overflow-hidden">
@@ -2137,7 +2120,6 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
   const [ss,setSS]             = useState(state.subjects[0]?.id||"");
   const [me,setME]             = useState<Record<string,string>>({});
   const [dashCls,setDashCls]   = useState(state.classes[0]?.id||"");
-  const [dashExam,setDashExam] = useState<string>("__term__");
   const [adminSearch,setAS]    = useState("");
   const [adminClassF,setACF]   = useState("all");
   const [csvMsg,setCsvMsg]     = useState("");
@@ -2438,27 +2420,17 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
 
           {/* ✅ Subject-wise Performance Chart */}
           <div className="bg-[#080D18] border border-white/5 rounded-xl p-5">
-            <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+            <div className="flex items-center justify-between mb-5">
               <div>
                 <h3 className="text-sm font-semibold text-white">Subject-wise Performance</h3>
                 <p className="text-xs text-white/30 mt-0.5">Average marks per subject — hover bars for details</p>
               </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <select value={dashExam} onChange={e=>setDashExam(e.target.value)}
-                  className="bg-white/5 border border-white/10 text-white text-xs rounded-lg px-3 py-1.5 outline-none focus:border-blue-500/50">
-                  <option value="__term__">📅 Term Marks</option>
-                  {state.exams.length>0&&<option disabled className="text-white/30">── Exams ──</option>}
-                  {[...state.exams].sort((a,b)=>b.year-a.year).map(ex=>(
-                    <option key={ex.id} value={ex.id}>📝 {ex.name} ({ex.year})</option>
-                  ))}
-                </select>
-                <select value={dashCls} onChange={e=>setDashCls(e.target.value)}
-                  className="bg-white/5 border border-white/10 text-white text-xs rounded-lg px-3 py-1.5 outline-none focus:border-blue-500/50">
-                  {state.classes.map(c=><option key={c.id} value={c.id}>Class {c.name}-{c.section}</option>)}
-                </select>
-              </div>
+              <select value={dashCls} onChange={e=>setDashCls(e.target.value)}
+                className="bg-white/5 border border-white/10 text-white text-xs rounded-lg px-3 py-1.5 outline-none focus:border-blue-500/50">
+                {state.classes.map(c=><option key={c.id} value={c.id}>Class {c.name}-{c.section}</option>)}
+              </select>
             </div>
-            <SubjectChart state={state} classId={dashCls} examId={dashExam==="__term__"?undefined:dashExam}/>
+            <SubjectChart state={state} classId={dashCls}/>
           </div>
 
           {/* Today attendance summary */}
@@ -3210,10 +3182,9 @@ function TeacherView({user,state,setState,onLogout,onBackToSite,db}:
   const [sc,setSC]         = useState("");
   const [ss,setSS]         = useState("");
   const [me,setME]         = useState<Record<string,string>>({});
-  const [marksMode,setMarksMode] = useState<"monthly"|"exam">("monthly");
+  const [marksMode,setMarksMode] = useState<"current"|"exam">("current");
   const [marksYear,setMarksYear] = useState<number>(new Date().getFullYear());
   const [marksExamId,setMarksExamId] = useState<string>("");
-  const [marksMonth,setMarksMonth] = useState<string>(()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`});
   const [search,setSearch] = useState("");
   const [shCls,setShCls]   = useState("");
   const [editSt,setEditSt] = useState<Student|null>(null);
@@ -3550,19 +3521,12 @@ function TeacherView({user,state,setState,onLogout,onBackToSite,db}:
               {mySubjects.map(sub=>{
                 const cls=state.classes.filter(c=>sub.classIds.includes(c.id));
                 return(
-                  <div key={sub.id} className="p-3 bg-white/3 rounded-xl border border-white/5">
-                    <div className="flex items-center gap-3 mb-2">
-                      <span className="text-xs font-mono text-blue-400 bg-blue-500/10 px-2 py-1 rounded flex-shrink-0">{sub.code}</span>
-                      <span className="text-sm text-white font-medium">{sub.name}</span>
-                      <span className="text-xs text-white/30 ml-auto flex-shrink-0">{cls.length} class{cls.length!==1?"es":""}</span>
+                  <div key={sub.id} className="flex items-center justify-between p-3 bg-white/3 rounded-xl border border-white/5">
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs font-mono text-blue-400 bg-blue-500/10 px-2 py-1 rounded">{sub.code}</span>
+                      <span className="text-sm text-white">{sub.name}</span>
                     </div>
-                    <div className="flex flex-wrap gap-1.5 pl-1">
-                      {cls.map(c=>(
-                        <span key={c.id} className="text-[11px] bg-white/5 text-white/50 border border-white/10 px-2 py-0.5 rounded-full font-mono">
-                          {c.name}-{c.section}
-                        </span>
-                      ))}
-                    </div>
+                    <div className="flex gap-1">{cls.map(c=><span key={c.id} className="text-xs bg-white/5 text-white/40 px-2 py-0.5 rounded">{c.name}-{c.section}</span>)}</div>
                   </div>
                 );
               })}
@@ -3575,28 +3539,14 @@ function TeacherView({user,state,setState,onLogout,onBackToSite,db}:
         const examYears=[...new Set(state.exams.map(e=>e.year))].sort((a,b)=>b-a);
         const examsForYear=state.exams.filter(e=>e.year===(marksYear||examYears[0]));
         const isSavingToExam=marksMode==="exam"&&marksExamId;
-        const marksMonthLabel = (() => {
-          const [y,m] = marksMonth.split("-");
-          return new Date(Number(y),Number(m)-1,1).toLocaleString("default",{month:"long",year:"numeric"});
-        })();
-        const monthPrefix = `monthly_${marksMonth}_`;
         return(
         <div className="space-y-4 max-w-3xl">
           <h2 className="text-xl font-bold text-white">Enter Marks</h2>
           {/* Mode toggle */}
           <div className="flex gap-2 p-1 bg-white/5 rounded-xl w-fit">
-            <button onClick={()=>setMarksMode("monthly")} className={`text-xs px-4 py-2 rounded-lg font-medium transition-all ${marksMode==="monthly"?"bg-blue-600 text-white":"text-white/40 hover:text-white/70"}`}>📆 Monthly Test</button>
-            <button onClick={()=>setMarksMode("exam")} className={`text-xs px-4 py-2 rounded-lg font-medium transition-all ${marksMode==="exam"?"bg-purple-600 text-white":"text-white/40 hover:text-white/70"}`}>📝 Exam Records</button>
+            <button onClick={()=>setMarksMode("current")} className={`text-xs px-4 py-2 rounded-lg font-medium transition-all ${marksMode==="current"?"bg-blue-600 text-white":"text-white/40 hover:text-white/70"}`}>Current Marks</button>
+            <button onClick={()=>setMarksMode("exam")} className={`text-xs px-4 py-2 rounded-lg font-medium transition-all ${marksMode==="exam"?"bg-purple-600 text-white":"text-white/40 hover:text-white/70"}`}>Exam Records</button>
           </div>
-          {/* Monthly month picker */}
-          {marksMode==="monthly"&&(
-            <div className="flex gap-3 flex-wrap items-center bg-blue-500/5 border border-blue-500/20 rounded-xl p-3">
-              <span className="text-xs text-blue-300/60 font-medium">Month:</span>
-              <input type="month" value={marksMonth} onChange={e=>setMarksMonth(e.target.value)}
-                className="bg-[#05080F] border border-white/10 text-white text-sm rounded-lg px-3 py-2 outline-none [color-scheme:dark]"/>
-              <span className="text-xs text-blue-300 bg-blue-500/10 px-3 py-1 rounded-full border border-blue-500/20">{marksMonthLabel}</span>
-            </div>
-          )}
           {/* Exam selector row */}
           {marksMode==="exam"&&(
             <div className="flex gap-3 flex-wrap items-center bg-purple-500/5 border border-purple-500/20 rounded-xl p-3">
@@ -3626,11 +3576,7 @@ function TeacherView({user,state,setState,onLogout,onBackToSite,db}:
           {sc&&ss?(
             <div className="bg-[#080D18] border border-white/5 rounded-xl overflow-hidden">
               <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between">
-                <span className="text-sm text-white/60">
-                  {state.subjects.find(s=>s.id===ss)?.name}
-                  {isSavingToExam&&<span className="text-purple-400 text-xs ml-2">→ {state.exams.find(e=>e.id===marksExamId)?.name}</span>}
-                  {marksMode==="monthly"&&<span className="text-blue-400 text-xs ml-2">→ {marksMonthLabel}</span>}
-                </span>
+                <span className="text-sm text-white/60">{state.subjects.find(s=>s.id===ss)?.name} {isSavingToExam&&<span className="text-purple-400 text-xs ml-2">→ {state.exams.find(e=>e.id===marksExamId)?.name}</span>}</span>
                 <button onClick={()=>{
                   if(marksMode==="exam"&&marksExamId){
                     const newRecs:ExamRecord[]=[];
@@ -3638,26 +3584,23 @@ function TeacherView({user,state,setState,onLogout,onBackToSite,db}:
                     Object.entries(me).forEach(([id,v])=>{const n=parseFloat(v);if(!isNaN(n))newRecs.push({id:uid(),examId:marksExamId,studentId:id,subjectId:ss,marks:n});});
                     setState(s=>({...s,examRecords:[...s.examRecords.filter(r=>!(r.examId===marksExamId&&r.subjectId===ss&&classStudents.some(st=>st.id===r.studentId))),...newRecs]}));
                   } else {
-                    // Monthly mode — save with month-prefixed key
                     const upds:Record<string,number>={};
                     Object.entries(me).forEach(([id,v])=>{const n=parseFloat(v);if(!isNaN(n))upds[id]=n;});
                     setState(s=>{
-                      const updated=s.students.map(st=>upds[st.id]!==undefined?{...st,marks:{...st.marks,[monthPrefix+ss]:upds[st.id]}}:st);
+                      const updated=s.students.map(st=>upds[st.id]!==undefined?{...st,marks:{...st.marks,[ss]:upds[st.id]}}:st);
                       updated.filter(st=>upds[st.id]!==undefined).forEach(st=>{try{sb.update("students",st.id,{marks:st.marks});}catch{}});
                       return {...s,students:updated};
                     });
                   }
                   setME({});
-                }} className={`flex items-center gap-2 text-xs ${isSavingToExam?"bg-purple-500/20 text-purple-400 border-purple-500/20 hover:bg-purple-500/30":"bg-blue-500/20 text-blue-400 border-blue-500/20 hover:bg-blue-500/30"} border px-3 py-1.5 rounded-lg transition-colors`}>
-                  <Save size={12}/>Save {isSavingToExam?"to Exam":"Monthly"}
-                </button>
+                }} className={`flex items-center gap-2 text-xs ${isSavingToExam?"bg-purple-500/20 text-purple-400 border-purple-500/20 hover:bg-purple-500/30":"bg-emerald-500/20 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/30"} border px-3 py-1.5 rounded-lg transition-colors`}><Save size={12}/>Save {isSavingToExam?"to Exam":""}</button>
               </div>
               <table className="w-full">
                 <thead><tr className="border-b border-white/5">{["Student","Roll","Previous","Enter /100"].map(h=><th key={h} className="text-left text-xs font-semibold text-white/40 uppercase px-4 py-3">{h}</th>)}</tr></thead>
                 <tbody>{state.students.filter(s=>s.classId===sc).map(st=>{
                   const cur=marksMode==="exam"&&marksExamId
                     ? (state.examRecords.find(r=>r.examId===marksExamId&&r.studentId===st.id&&r.subjectId===ss)?.marks)
-                    : st.marks[monthPrefix+ss];
+                    : st.marks[ss];
                   return(
                     <tr key={st.id} className="border-b border-white/5 hover:bg-white/5">
                       <td className="px-4 py-3"><div className="flex items-center gap-2"><img src={st.photo||undefined} className="w-7 h-7 rounded-full"/><span className="text-sm text-white">{st.name}</span></div></td>
@@ -4290,14 +4233,9 @@ function StudentResults({student,state,myClass,mySubjects,myRank,classStudents}:
   myRank:number; classStudents:Student[];
 }) {
   const exams = state.exams || [];
-  const [mode,   setMode]   = React.useState<"monthly"|"exam">("monthly");
-  const [month,  setMonth]  = React.useState(()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;});
+  const [mode,   setMode]   = React.useState<"term"|"exam">("term");
+  const [term,   setTerm]   = React.useState("Term 1");
   const [examId, setExamId] = React.useState(exams[0]?.id||"");
-
-  const monthLabel = React.useMemo(()=>{
-    const [y,m] = month.split("-");
-    return new Date(Number(y),Number(m)-1,1).toLocaleString("default",{month:"long",year:"numeric"});
-  },[month]);
 
   // Build marks for the selected source
   const marksMap: Record<string,number|undefined> = React.useMemo(()=>{
@@ -4307,40 +4245,28 @@ function StudentResults({student,state,myClass,mySubjects,myRank,classStudents}:
       recs.forEach(r=>{ m[r.subjectId]=r.marks; });
       return m;
     }
-    // monthly mode — use month-prefixed keys
-    const prefix = `monthly_${month}_`;
-    const m: Record<string,number|undefined> = {};
-    Object.keys(student.marks||{}).forEach(k=>{
-      if(k.startsWith(prefix)) m[k.replace(prefix,"")]=student.marks[k] as number;
-    });
-    return m;
-  },[mode, examId, month, student, state.examRecords]);
+    // term mode — use student.marks (keyed by subjectId)
+    return student.marks as Record<string,number|undefined>;
+  },[mode, examId, student, state.examRecords]);
 
   const validMarks = mySubjects.map(s=>marksMap[s.id]).filter(m=>m!==undefined) as number[];
   const total      = validMarks.reduce((a,b)=>a+b,0);
   const avg        = validMarks.length ? Math.round((total/validMarks.length)*10)/10 : 0;
   const grade      = getGrade(avg);
 
-  // Rank among classmates for this specific exam/month
+  // Rank among classmates for this specific exam/term
   const myRankForSource = React.useMemo(()=>{
-    if (mode==="monthly") {
-      const prefix = `monthly_${month}_`;
-      const ranked = classStudents.map(st=>{
-        const t = Object.keys(st.marks||{}).filter(k=>k.startsWith(prefix)).reduce((a,k)=>a+(st.marks[k] as number||0),0);
-        return {id:st.id,total:t};
-      }).sort((a,b)=>b.total-a.total);
-      return ranked.findIndex(r=>r.id===student.id)+1;
-    }
+    if (mode==="term") return myRank;
     const ranked = classStudents.map(st=>{
       const recs=(state.examRecords||[]).filter(r=>r.examId===examId&&r.studentId===st.id);
       const t=recs.reduce((a,r)=>a+(r.marks||0),0);
       return {id:st.id, total:t};
     }).sort((a,b)=>b.total-a.total);
     return ranked.findIndex(r=>r.id===student.id)+1;
-  },[mode, examId, month, classStudents, student, state.examRecords, myRank]);
+  },[mode, examId, classStudents, student, state.examRecords, myRank]);
 
   const selectedExamName = exams.find(e=>e.id===examId)?.name || "";
-  const resultLabel      = mode==="exam" ? selectedExamName : monthLabel;
+  const resultLabel      = mode==="exam" ? selectedExamName : term;
 
   return(
     <div className="space-y-4 max-w-xl">
@@ -4356,24 +4282,27 @@ function StudentResults({student,state,myClass,mySubjects,myRank,classStudents}:
 
       {/* Mode + selector bar */}
       <div className="bg-[#080D18] border border-white/8 rounded-2xl p-4 space-y-3">
-        {/* Monthly / Exam toggle */}
+        {/* Term / Exam toggle */}
         <div className="flex gap-2">
           <div className="flex bg-white/5 rounded-xl p-1 gap-1">
-            {(["monthly","exam"] as const).map(m=>(
+            {(["term","exam"] as const).map(m=>(
               <button key={m} onClick={()=>setMode(m)}
                 className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${mode===m?"bg-blue-600 text-white shadow":"text-white/40 hover:text-white/70"}`}>
-                {m==="monthly"?"📆 Monthly Test":"📝 Exam"}
+                {m==="term"?"📅 Term Test":"📝 Exam"}
               </button>
             ))}
           </div>
         </div>
 
-        {/* Month picker OR exam dropdown */}
-        {mode==="monthly" ? (
-          <div className="flex gap-3 items-center flex-wrap">
-            <input type="month" value={month} onChange={e=>setMonth(e.target.value)}
-              className="bg-[#0d1829] border border-white/10 text-white text-sm rounded-xl px-3 py-2 outline-none focus:border-blue-500/50 [color-scheme:dark]"/>
-            <span className="text-xs text-blue-400 bg-blue-500/10 border border-blue-500/20 px-3 py-1.5 rounded-lg font-medium">{monthLabel}</span>
+        {/* Term buttons OR exam dropdown */}
+        {mode==="term" ? (
+          <div className="flex gap-2 flex-wrap">
+            {["Term 1","Term 2","Term 3","Annual"].map(t=>(
+              <button key={t} onClick={()=>setTerm(t)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${term===t?"bg-blue-600 border-blue-500 text-white":"border-white/10 text-white/40 hover:text-white/70 hover:border-white/20"}`}>
+                {t}
+              </button>
+            ))}
           </div>
         ):(
           <div className="flex items-center gap-3 flex-wrap">
@@ -4518,19 +4447,10 @@ function StudentView({user,state,setState,onLogout,onBackToSite}:
 
   // Find the most recently created exam that has at least one record for this student
   const latestExamWithResults = [...exams]
-    .reverse()
+    .reverse() // most recent first (exams are appended, so last = newest)
     .find(ex => examRecords.some(r => r.examId===ex.id && r.studentId===student.id));
 
-  // Find latest monthly test data if no exam — look for highest month key
-  const latestMonthlyKey = React.useMemo(()=>{
-    const prefix = "monthly_";
-    const months = [...new Set(
-      Object.keys(student.marks||{}).filter(k=>k.startsWith(prefix)).map(k=>k.split("_")[1])
-    )].filter(Boolean).sort().reverse();
-    return months[0] || null;
-  },[student.marks]);
-
-  // Build dashMarks: exam → monthly → empty
+  // Build dashMarks: from latest exam if available, else fall back to student.marks
   const dashMarks: Record<string,number|undefined> = latestExamWithResults
     ? (() => {
         const m: Record<string,number|undefined> = {};
@@ -4539,22 +4459,11 @@ function StudentView({user,state,setState,onLogout,onBackToSite}:
           .forEach(r=>{ m[r.subjectId]=r.marks; });
         return m;
       })()
-    : latestMonthlyKey
-      ? (() => {
-          const prefix = `monthly_${latestMonthlyKey}_`;
-          const m: Record<string,number|undefined> = {};
-          Object.keys(student.marks||{}).filter(k=>k.startsWith(prefix)).forEach(k=>{
-            m[k.replace(prefix,"")]=student.marks[k] as number;
-          });
-          return m;
-        })()
-      : {};
+    : student.marks as Record<string,number|undefined>;
 
   const dashSource = latestExamWithResults
-    ? `📝 ${latestExamWithResults.name} (${latestExamWithResults.year})`
-    : latestMonthlyKey
-      ? `📆 ${new Date(Number(latestMonthlyKey.split("-")[0]),Number(latestMonthlyKey.split("-")[1])-1,1).toLocaleString("default",{month:"long",year:"numeric"})}`
-      : null;
+    ? `${latestExamWithResults.name} (${latestExamWithResults.year})`
+    : null; // null = using term marks
 
   const validMarks     = mySubjects.map(s=>dashMarks[s.id]).filter(m=>m!==undefined) as number[];
   const total          = validMarks.reduce((a,b)=>a+b,0);
@@ -4566,13 +4475,9 @@ function StudentView({user,state,setState,onLogout,onBackToSite}:
 
   // Rank using same source
   const ranked = classStudents.map(st=>{
-    let marks = 0;
-    if(latestExamWithResults){
-      marks = examRecords.filter(r=>r.examId===latestExamWithResults.id&&r.studentId===st.id).reduce((a,r)=>a+(r.marks||0),0);
-    } else if(latestMonthlyKey){
-      const prefix = `monthly_${latestMonthlyKey}_`;
-      marks = Object.keys(st.marks||{}).filter(k=>k.startsWith(prefix)).reduce((a,k)=>a+((st.marks[k] as number)||0),0);
-    }
+    const marks = latestExamWithResults
+      ? examRecords.filter(r=>r.examId===latestExamWithResults.id&&r.studentId===st.id).reduce((a,r)=>a+(r.marks||0),0)
+      : mySubjects.map(s=>(st.marks[s.id]||0)).reduce((a,b)=>a+b,0);
     return {id:st.id, total:marks};
   }).sort((a,b)=>b.total-a.total);
   const myRank = ranked.findIndex(r=>r.id===student.id)+1;
@@ -4594,12 +4499,12 @@ function StudentView({user,state,setState,onLogout,onBackToSite}:
             </div>
           </div>
 
-          {/* Source label — auto-updates when results are released */}
+          {/* Source label — auto-updates when exam results are released */}
           <div className="flex items-center gap-2">
             <div className="h-px flex-1 bg-white/5"/>
             {dashSource
-              ? <span className="text-[11px] text-blue-400 bg-blue-500/10 border border-blue-500/20 px-3 py-1 rounded-full font-medium whitespace-nowrap">{dashSource}</span>
-              : <span className="text-[11px] text-white/20 bg-white/5 border border-white/8 px-3 py-1 rounded-full whitespace-nowrap">No results yet</span>
+              ? <span className="text-[11px] text-purple-400 bg-purple-500/10 border border-purple-500/20 px-3 py-1 rounded-full font-medium whitespace-nowrap">📝 {dashSource}</span>
+              : <span className="text-[11px] text-white/20 bg-white/5 border border-white/8 px-3 py-1 rounded-full whitespace-nowrap">📅 Term Marks</span>
             }
             <div className="h-px flex-1 bg-white/5"/>
           </div>
@@ -6198,6 +6103,7 @@ function DownloadsManager({state,setState}:{state:AppState;setState:(fn:(s:AppSt
   const [selSubjectId,setSelSubjectId]=useState("");
   const [filter,setFilter]=useState("all");
   const [msg,setMsg]=useState("");
+  const [thumbUrl,setThumbUrl]=useState<string>("");
 
   function addCat(){
     if(!newCatName.trim())return;
@@ -6213,15 +6119,15 @@ function DownloadsManager({state,setState}:{state:AppState;setState:(fn:(s:AppSt
     if(!urlInput.trim()||!fileName.trim())return;
     const clsObj=state.classes.find(x=>x.id===selClassId);
     const subObj=state.subjects.find(x=>x.id===selSubjectId);
-    upd(c=>({...c,media:[...c.media,{id:uid(),name:fileName.trim(),url:urlInput.trim(),type:fileType,size:"—",uploadedAt:today,source:"download" as const,category:selCatId||undefined,classId:selClassId||undefined,subjectId:selSubjectId||undefined,className:clsObj?`${clsObj.name}-${clsObj.section}`:undefined,subjectName:subObj?.name}]}));
-    setUrl("");setFName("");setMsg("Added!");setTimeout(()=>setMsg(""),2000);
+    upd(c=>({...c,media:[...c.media,{id:uid(),name:fileName.trim(),url:urlInput.trim(),type:fileType,size:"—",uploadedAt:today,source:"download" as const,category:selCatId||undefined,classId:selClassId||undefined,subjectId:selSubjectId||undefined,className:clsObj?`${clsObj.name}-${clsObj.section}`:undefined,subjectName:subObj?.name,thumbUrl:thumbUrl||undefined}]}));
+    setUrl("");setFName("");setThumbUrl("");setMsg("Added!");setTimeout(()=>setMsg(""),2000);
   }
   function addFromFile(f:File,url:string){
     const t=f.type.includes("pdf")?"pdf":"image";
     const clsObj2=state.classes.find(x=>x.id===selClassId);
     const subObj2=state.subjects.find(x=>x.id===selSubjectId);
-    upd(c=>({...c,media:[...c.media,{id:uid(),name:f.name,url,type:t as any,size:`${(f.size/1024).toFixed(1)} KB`,uploadedAt:today,source:"download" as const,category:selCatId||undefined,classId:selClassId||undefined,subjectId:selSubjectId||undefined,className:clsObj2?`${clsObj2.name}-${clsObj2.section}`:undefined,subjectName:subObj2?.name}]}));
-    setMsg("Uploaded!");setTimeout(()=>setMsg(""),2000);
+    upd(c=>({...c,media:[...c.media,{id:uid(),name:f.name,url,type:t as any,size:`${(f.size/1024).toFixed(1)} KB`,uploadedAt:today,source:"download" as const,category:selCatId||undefined,classId:selClassId||undefined,subjectId:selSubjectId||undefined,className:clsObj2?`${clsObj2.name}-${clsObj2.section}`:undefined,subjectName:subObj2?.name,thumbUrl:thumbUrl||undefined}]}));
+    setThumbUrl("");setMsg("Uploaded!");setTimeout(()=>setMsg(""),2000);
   }
 
   const filtered=state.cms.media.filter(m=>(m.source==="download"||(!m.source&&m.category))&&(filter==="all"||(m.category===filter)));
@@ -6298,6 +6204,33 @@ function DownloadsManager({state,setState}:{state:AppState;setState:(fn:(s:AppSt
             </div>
           </div>
         )}
+        {/* Thumbnail upload — optional cover image */}
+        <div className="border border-white/8 rounded-xl p-4 space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-white/40 uppercase tracking-widest font-semibold">Cover Image</span>
+            <span className="text-[10px] text-white/20 bg-white/5 px-2 py-0.5 rounded-full">optional</span>
+          </div>
+          {thumbUrl ? (
+            <div className="flex items-center gap-3">
+              <img src={thumbUrl} className="w-20 h-14 object-cover rounded-lg border border-white/10"/>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-emerald-400 mb-1">✓ Cover image set</p>
+                <p className="text-[11px] text-white/30">Visitors will see this image instead of a file icon. Clicking it downloads the file.</p>
+              </div>
+              <button onClick={()=>setThumbUrl("")} className="text-white/20 hover:text-red-400 flex-shrink-0"><X size={14}/></button>
+            </div>
+          ):(
+            <label className="flex items-center gap-3 border border-dashed border-white/10 hover:border-emerald-500/30 rounded-xl px-4 py-3 cursor-pointer transition-colors group">
+              <Image size={16} className="text-white/20 group-hover:text-emerald-400 flex-shrink-0"/>
+              <span className="text-white/30 text-xs group-hover:text-white/50">Upload a cover image (JPG, PNG, WebP…)</span>
+              <input type="file" accept="image/*" className="hidden" onChange={e=>{
+                const f=e.target.files?.[0]; if(!f) return;
+                const r=new FileReader(); r.onload=ev=>setThumbUrl(ev.target?.result as string);
+                r.readAsDataURL(f); e.target.value="";
+              }}/>
+            </label>
+          )}
+        </div>
         {msg&&<p className="text-emerald-400 text-xs">{msg}</p>}
       </div>
 
@@ -7512,12 +7445,26 @@ function PageDownloads({cms,state,T}:{cms:CMS;state?:AppState;T:LangT}){
               {dlMedia.filter(m=>!m.category).length>0&&(
                 <div>
                   <h3 className="text-white/50 text-xs font-semibold uppercase tracking-widest mb-4">Other Files</h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                     {dlMedia.filter(m=>!m.category).map(m=>(
-                      <a key={m.id} href={m.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 bg-[#1a2540]/5 hover:bg-[#1a2540]/10 border border-[#1a2540]/10 hover:border-[#C9A84C]/30 rounded-xl px-4 py-3 transition-all group">
-                        <span className="text-xl">{m.type==="pdf"?"📄":"🖼️"}</span>
-                        <div className="flex-1 min-w-0"><div className="text-[#1a2540] text-sm truncate">{m.name}</div><div className="text-[#1a2540]/40 text-xs">{m.uploadedAt}</div></div>
-                        <Download size={14} className="text-[#1a2540]/30 group-hover:text-[#C9A84C]"/>
+                      <a key={m.id} href={m.url} target="_blank" rel="noopener noreferrer" download
+                        className="group block rounded-2xl border border-[#1a2540]/10 hover:border-[#C9A84C]/40 bg-[#1a2540]/5 hover:bg-[#1a2540]/10 overflow-hidden transition-all shadow-sm hover:shadow-md">
+                        {m.thumbUrl ? (
+                          <div className="relative overflow-hidden">
+                            <img src={m.thumbUrl} alt={m.name} className="w-full h-32 object-cover group-hover:scale-105 transition-transform duration-300"/>
+                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                              <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-[#C9A84C] rounded-full p-2 shadow-lg"><Download size={14} className="text-white"/></div>
+                            </div>
+                          </div>
+                        ):(
+                          <div className="h-24 bg-[#1a2540]/10 flex items-center justify-center group-hover:bg-[#1a2540]/20 transition-colors">
+                            <span className="text-4xl opacity-60">{m.type==="pdf"?"📄":"🖼️"}</span>
+                          </div>
+                        )}
+                        <div className="px-4 py-3">
+                          <div className="text-[#1a2540] text-sm truncate">{m.name}</div>
+                          <div className="text-[#1a2540]/40 text-xs mt-0.5">{m.uploadedAt}</div>
+                        </div>
                       </a>
                     ))}
                   </div>
@@ -7571,15 +7518,33 @@ function PageDownloads({cms,state,T}:{cms:CMS;state?:AppState;T:LangT}){
                 {filteredFiles.length===0?(
                   <div className="text-[#1a2540]/30 text-sm text-center py-12">No files found.</div>
                 ):(
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                     {filteredFiles.map(m=>(
-                      <a key={m.id} href={m.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 bg-[#1a2540]/5 hover:bg-[#1a2540]/10 border border-[#1a2540]/10 hover:border-[#C9A84C]/30 rounded-xl px-4 py-3 transition-all group">
-                        <span className="text-2xl">{m.type==="pdf"?"📄":"🖼️"}</span>
-                        <div className="flex-1 min-w-0">
+                      <a key={m.id} href={m.url} target="_blank" rel="noopener noreferrer" download
+                        className="group block rounded-2xl border border-[#1a2540]/10 hover:border-[#C9A84C]/40 bg-[#1a2540]/5 hover:bg-[#1a2540]/10 overflow-hidden transition-all shadow-sm hover:shadow-md">
+                        {/* Thumbnail or icon */}
+                        {m.thumbUrl ? (
+                          <div className="relative overflow-hidden">
+                            <img src={m.thumbUrl} alt={m.name} className="w-full h-36 object-cover group-hover:scale-105 transition-transform duration-300"/>
+                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                              <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-[#C9A84C] rounded-full p-2 shadow-lg">
+                                <Download size={16} className="text-white"/>
+                              </div>
+                            </div>
+                          </div>
+                        ):(
+                          <div className="h-28 bg-[#1a2540]/10 flex items-center justify-center group-hover:bg-[#1a2540]/20 transition-colors">
+                            <span className="text-5xl opacity-60">{m.type==="pdf"?"📄":"🖼️"}</span>
+                          </div>
+                        )}
+                        {/* File info */}
+                        <div className="px-4 py-3">
                           <div className="text-[#1a2540] text-sm font-medium truncate">{m.name}</div>
-                          <div className="text-[#1a2540]/40 text-xs mt-0.5">{m.uploadedAt} · {m.size}</div>
+                          <div className="flex items-center justify-between mt-1">
+                            <span className="text-[#1a2540]/40 text-xs">{m.uploadedAt} · {m.size}</span>
+                            <Download size={13} className="text-[#1a2540]/20 group-hover:text-[#C9A84C] transition-colors flex-shrink-0"/>
+                          </div>
                         </div>
-                        <Download size={16} className="text-[#1a2540]/20 group-hover:text-[#C9A84C] transition-colors flex-shrink-0"/>
                       </a>
                     ))}
                   </div>
