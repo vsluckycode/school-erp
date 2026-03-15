@@ -308,6 +308,7 @@ interface LoggedInUser { role:Role; id:string; name:string }
 
 // ─── PII Encryption (XOR + btoa — replace with Web Crypto AES in production) ──
 const ENC_KEY = "NEXUS_ERP_2026";
+const PW_VERSION     = "erp_pw_v2"; // bump this to force password re-load from Supabase
 function encPII(v:string):string { if(!v) return ""; try { return btoa(unescape(encodeURIComponent(v.split("").map((c,i)=>String.fromCharCode(c.charCodeAt(0)^ENC_KEY.charCodeAt(i%ENC_KEY.length))).join("")))); } catch { return btoa(v); } }
 function decPII(v:string):string { if(!v) return ""; try { return decodeURIComponent(escape(atob(v))).split("").map((c,i)=>String.fromCharCode(c.charCodeAt(0)^ENC_KEY.charCodeAt(i%ENC_KEY.length))).join(""); } catch { try { return atob(v); } catch { return v; } } }
 function encProfile<T extends Record<string,any>>(p:T):T { const o:any={}; Object.entries(p).forEach(([k,v])=>{o[k]=v?encPII(String(v)):v;}); return o as T; }
@@ -8153,6 +8154,23 @@ function RegistrationScreen({state,setState,onBack}:{state:AppState;setState:(fn
 }
 
 export default function SchoolERP() {
+  // ─── One-time migration: clear old plain-text passwords from localStorage ──
+  React.useEffect(()=>{
+    if(!localStorage.getItem(PW_VERSION)){
+      // Clear old state that may contain plain-text admin123
+      try{
+        const bak=localStorage.getItem("erp_settings_bak");
+        if(bak){
+          const parsed=JSON.parse(bak);
+          // If passwords look unencrypted (short, readable), clear them
+          if(parsed.pwAdmin&&parsed.pwAdmin.length<20){
+            localStorage.removeItem("erp_settings_bak");
+          }
+        }
+      }catch{}
+      localStorage.setItem(PW_VERSION,"1");
+    }
+  },[]);
   // ─── Load saved state from localStorage on first render ───────────────────
   const [state,setState] = useState<AppState>(() => {
     try {
@@ -8235,8 +8253,17 @@ export default function SchoolERP() {
       // 3. Full state — strip base64 logo + keep media (media with base64 saved separately)
       try {
         const toSave = {
+        const BLANK_PW = ""; // never store plain passwords in main state key
+        const toSave = {
           ...next,
-          settings: { ...next.settings, logoUrl: next.settings.logoUrl?.startsWith("data:") ? "" : (next.settings.logoUrl || "") },
+          settings: {
+            ...next.settings,
+            logoUrl:     next.settings.logoUrl?.startsWith("data:") ? "" : (next.settings.logoUrl || ""),
+            pwAdmin:     BLANK_PW,
+            pwCounselor: BLANK_PW,
+            pwStaff:     BLANK_PW,
+            pwExam:      BLANK_PW,
+          },
         };
         localStorage.setItem(STATE_KEY, JSON.stringify(toSave));
       } catch (e) {
@@ -8244,7 +8271,11 @@ export default function SchoolERP() {
         try {
           const stripped = {
             ...next,
-            settings: { ...next.settings, logoUrl: "" },
+            settings: {
+              ...next.settings,
+              logoUrl: "",
+              pwAdmin: "", pwCounselor: "", pwStaff: "", pwExam: "",
+            },
             cms: { ...next.cms, media: next.cms.media.map(m => m.url?.startsWith("data:") ? {...m, url:""} : m) },
           };
           localStorage.setItem(STATE_KEY, JSON.stringify(stripped));
@@ -8341,17 +8372,28 @@ export default function SchoolERP() {
         exams:       config?.exams       ?? prev.exams,
         examRecords: config?.examRecords ?? prev.examRecords,
         // Protect sensitive/local-only fields from Supabase overwrite
-        settings:  config?.settings  ? {
-          ...prev.settings,
-          ...config.settings,
-          logoUrl:       prev.settings.logoUrl,  // logo is local-only (stripped from config)
-          // Decrypt passwords from Supabase — fall back to local if not in DB yet
-          pwAdmin:      config.settings.pwAdmin      ? decPII(config.settings.pwAdmin)      : prev.settings.pwAdmin,
-          pwCounselor:  config.settings.pwCounselor  ? decPII(config.settings.pwCounselor)  : prev.settings.pwCounselor,
-          pwStaff:      config.settings.pwStaff      ? decPII(config.settings.pwStaff)      : prev.settings.pwStaff,
-          pwExam:       config.settings.pwExam       ? decPII(config.settings.pwExam)       : prev.settings.pwExam,
-          adminUsername: config.settings.adminUsername || prev.settings.adminUsername || "admin",
-        } : prev.settings,
+        settings:  config?.settings  ? (()=>{
+          const merged = {
+            ...prev.settings,
+            ...config.settings,
+            logoUrl:       prev.settings.logoUrl,  // logo is local-only (stripped from config)
+            // Decrypt passwords from Supabase — fall back to local if not in DB yet
+            pwAdmin:      config.settings.pwAdmin      ? decPII(config.settings.pwAdmin)      : prev.settings.pwAdmin,
+            pwCounselor:  config.settings.pwCounselor  ? decPII(config.settings.pwCounselor)  : prev.settings.pwCounselor,
+            pwStaff:      config.settings.pwStaff      ? decPII(config.settings.pwStaff)      : prev.settings.pwStaff,
+            pwExam:       config.settings.pwExam       ? decPII(config.settings.pwExam)       : prev.settings.pwExam,
+            adminUsername: config.settings.adminUsername || prev.settings.adminUsername || "admin",
+          };
+          // Update erp_settings_bak with freshly decrypted passwords from Supabase
+          try{ localStorage.setItem("erp_settings_bak", JSON.stringify({
+            ...merged, logoUrl:"",
+            pwAdmin:     encPII(merged.pwAdmin),
+            pwCounselor: encPII(merged.pwCounselor),
+            pwStaff:     encPII(merged.pwStaff),
+            pwExam:      encPII(merged.pwExam),
+          })); }catch{}
+          return merged;
+        })() : prev.settings,
         // CMS: merge Supabase cms with localStorage cms
         // For media: Supabase has url="" for base64 items — restore url from localStorage version
         cms: cmsDb ? (() => {
