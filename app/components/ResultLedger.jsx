@@ -438,6 +438,7 @@ export default function ResultLedger({ db, user, state, setState }) {
   const [previousMarks, setPreviousMarks] = useState({});
   const [previousExamName, setPrevExamName] = useState("");
 
+  const isMiddle=["6","7","8","9"].includes(selGrade);
   const isOL=selGrade==="10"||selGrade==="11";
   const isAL=selGrade==="12"||selGrade==="13";
 
@@ -637,6 +638,7 @@ export default function ResultLedger({ db, user, state, setState }) {
     {key:"ledger",  label:"📋 Ledger"},
     {key:"summary", label:"📈 Summary"},
     {key:"charts",  label:"📊 Charts"},
+    ...(isMiddle?[{key:"middle_analysis",label:"📐 Class Analysis"}]:[]),
     ...(isOL?[{key:"ol_analysis",label:"🎓 O/L Analysis"}]:[]),
     ...(isAL?[{key:"al_analysis",label:"🏫 A/L Analysis"}]:[]),
   ];
@@ -808,6 +810,11 @@ export default function ResultLedger({ db, user, state, setState }) {
           ]:isAL?[
             {label:"A/L Qualify (3 passes)",value:alCounts.qualify, icon:"🎓",color:"#22c55e"},
             {label:"3+ Credits",            value:alCounts.credits3,icon:"⭐",color:"#f59e0b"},
+          ]:isMiddle?[
+            {label:"Above Average",value:students.filter(s=>
+              s.total>(students.reduce((a,b)=>a+b.total,0)/Math.max(students.length,1))).length,
+              icon:"⭐",color:"#22c55e"},
+            {label:"Need Support",value:students.filter(s=>s.avg<40).length,icon:"⚠️",color:"#ef4444"},
           ]:[
             {label:"Above Average",value:students.filter(s=>
               s.total>(students.reduce((a,b)=>a+b.total,0)/Math.max(students.length,1))).length,
@@ -1077,6 +1084,144 @@ export default function ResultLedger({ db, user, state, setState }) {
         </div>
       )}
 
+      {/* ── MIDDLE SCHOOL ANALYSIS (Gr 6–9) ── */}
+      {viewMode==="middle_analysis"&&isMiddle&&(()=>{
+        const gradeOf=m=>{ if(m===undefined)return"–"; if(m>=75)return"A"; if(m>=65)return"B"; if(m>=55)return"C"; if(m>=40)return"S"; return"W"; };
+        const gradeCol=g=>({A:"#22c55e",B:"#60a5fa",C:"#eab308",S:"#f97316",W:"#ef4444","–":"#475569"}[g]||"#475569");
+        const total=students.length;
+        const aboveAvg=students.filter(s=>s.total>(students.reduce((a,b)=>a+b.total,0)/Math.max(total,1))).length;
+        const gradeDist={A:0,B:0,C:0,S:0,W:0};
+        students.forEach(s=>{ const g=gradeOf(s.avg); if(g in gradeDist) gradeDist[g]++; });
+        const classAvg=total?(students.reduce((a,s)=>a+s.total,0)/total).toFixed(1):"—";
+        const highest=students[0]?.total||0;
+        const lowest=students.length?students[students.length-1]?.total||0:0;
+        // CSV rows for export
+        const csvRows=[
+          ["#","Roll No","Name","M/F",...subjects.map(s=>s),"Total","Average","Grade","Rank"],
+          ...students.map((s,i)=>[i+1,s.rollNo,s.name,s.gender||"M",...subjects.map(sub=>s.marks[sub]??""),s.total,(s.avg||0).toFixed(1),gradeOf(s.avg),i+1])
+        ];
+        const sectionId="middle-analysis-section";
+        const filename=`Grade${selGrade}${selClass!=="All"?selClass:""}-Analysis`;
+        return(
+        <div style={{padding:"18px 22px"}} id={sectionId}>
+          <ExportBar sectionId={sectionId} csvRows={csvRows} filename={filename} label="Class Analysis"/>
+          {/* Summary stat cards */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:20}}>
+            {[
+              {label:"Total Students",   value:total,     icon:"👥",color:"#60a5fa",desc:"Enrolled"},
+              {label:"Class Average",    value:classAvg,  icon:"📊",color:"#a78bfa",desc:"Average Marks"},
+              {label:"Highest Total",    value:highest,   icon:"🏆",color:"#fbbf24",desc:"Top Score"},
+              {label:"Lowest Total",     value:lowest,    icon:"📉",color:"#f97316",desc:"Lowest Score"},
+              {label:"Above Average",    value:aboveAvg,  icon:"⭐",color:"#22c55e",desc:"Students"},
+              {label:"Below Average",    value:total-aboveAvg,icon:"⚠️",color:"#ef4444",desc:"Need Support"},
+            ].map(c=>(
+              <div key={c.label} style={{background:"#0f1e3d",borderRadius:10,padding:14,
+                border:`1px solid ${c.color}33`,borderTop:`3px solid ${c.color}`}}>
+                <div style={{fontSize:20}}>{c.icon}</div>
+                <div style={{fontSize:28,fontWeight:800,color:c.color}}>{c.value}</div>
+                <div style={{fontSize:11,fontWeight:600,color:c.color,marginBottom:2}}>{c.desc}</div>
+                <div style={{fontSize:10,color:"#334155"}}>{c.label}</div>
+              </div>
+            ))}
+          </div>
+          {/* Grade distribution */}
+          <div style={{background:"#0f1e3d",borderRadius:10,padding:14,marginBottom:20,border:"1px solid #1e3a6e"}}>
+            <div style={{fontSize:13,color:"#94a3b8",fontWeight:600,marginBottom:12}}>Grade Distribution</div>
+            <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+              {Object.entries(gradeDist).map(([g,n])=>(
+                <div key={g} style={{textAlign:"center",background:gradeCol(g)+"22",border:`1px solid ${gradeCol(g)}44`,
+                  borderRadius:8,padding:"10px 18px",minWidth:60}}>
+                  <div style={{fontSize:22,fontWeight:800,color:gradeCol(g)}}>{n}</div>
+                  <div style={{fontSize:12,fontWeight:700,color:gradeCol(g)}}>Grade {g}</div>
+                  <div style={{fontSize:10,color:"#475569"}}>{total?Math.round(n/total*100):0}%</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          {/* Per-subject analysis */}
+          <div style={{background:"#0f1e3d",borderRadius:10,padding:14,marginBottom:20,border:"1px solid #1e3a6e"}}>
+            <div style={{fontSize:13,color:"#94a3b8",fontWeight:600,marginBottom:12}}>Subject Performance</div>
+            <div style={{overflowX:"auto"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                <thead><tr style={{background:"#0a1628"}}>
+                  {["Subject","Average","Highest","Lowest","Pass","Fail","Pass %"].map(h=>(
+                    <th key={h} style={TH}>{h}</th>
+                  ))}
+                </tr></thead>
+                <tbody>
+                  {subjects.map((sub,i)=>{
+                    const vals=students.map(s=>s.marks[sub]).filter(v=>v!==undefined&&v!=="");
+                    const nums=vals.map(Number).filter(n=>!isNaN(n));
+                    const avg=nums.length?(nums.reduce((a,b)=>a+b,0)/nums.length).toFixed(1):"—";
+                    const pass=nums.filter(m=>m>=40).length;
+                    const fail=nums.filter(m=>m<40).length;
+                    const pct=nums.length?Math.round(pass/nums.length*100):0;
+                    return(
+                      <tr key={sub} style={{background:i%2===0?"#070e1c":"#0a1220"}}>
+                        <td style={{...TD,textAlign:"left",paddingLeft:10,color:"#cbd5e1",fontWeight:600}}>{sub}</td>
+                        <td style={{...TD,color:Number(avg)>=75?"#22c55e":Number(avg)>=40?"#f59e0b":"#ef4444",fontWeight:700}}>{avg}</td>
+                        <td style={{...TD,color:"#60a5fa"}}>{nums.length?Math.max(...nums):"—"}</td>
+                        <td style={{...TD,color:"#f97316"}}>{nums.length?Math.min(...nums):"—"}</td>
+                        <td style={{...TD,color:"#22c55e",fontWeight:700}}>{pass}</td>
+                        <td style={{...TD,color:"#ef4444",fontWeight:700}}>{fail}</td>
+                        <td style={TD}>
+                          <span style={{padding:"2px 8px",borderRadius:5,fontWeight:700,fontSize:11,
+                            background:pct>=75?"#14532d":pct>=50?"#422006":"#450a0a",
+                            color:pct>=75?"#22c55e":pct>=50?"#f97316":"#ef4444"}}>
+                            {pct}%
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          {/* Student ranking table */}
+          <div style={{fontSize:13,color:"#94a3b8",fontWeight:600,marginBottom:10}}>Student Rankings</div>
+          <div style={{overflowX:"auto",overflowY:"auto",maxHeight:"calc(100vh - 420px)",
+            scrollbarWidth:"thin",scrollbarColor:"#1e3a6e #060c1a"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+              <thead style={{position:"sticky",top:0,zIndex:5}}>
+                <tr style={{background:"#0f1e3d"}}>
+                  <th style={TH}>Rank</th>
+                  <th style={TH}>Roll No</th>
+                  <th style={{...TH,textAlign:"left",paddingLeft:8}}>Name</th>
+                  <th style={TH}>M/F</th>
+                  {subjects.map(s=><th key={s} style={{...TH,fontSize:10,minWidth:45}}>{s.slice(0,6)}</th>)}
+                  <th style={{...TH,color:"#60a5fa"}}>Total</th>
+                  <th style={{...TH,color:"#a78bfa"}}>Avg</th>
+                  <th style={{...TH,color:"#fbbf24"}}>Grade</th>
+                </tr>
+              </thead>
+              <tbody>
+                {students.map((s,i)=>{
+                  const g=gradeOf(s.avg);
+                  return(
+                    <tr key={s.id} style={{background:i%2===0?"#070e1c":"#0a1220"}}>
+                      <td style={{...TD,fontWeight:800,color:i===0?"#fbbf24":i<=2?"#a78bfa":"#475569"}}>#{i+1}</td>
+                      <td style={{...TD,fontFamily:"monospace",color:"#64748b"}}>{s.rollNo}</td>
+                      <td style={{...TD,textAlign:"left",paddingLeft:8,color:"#cbd5e1",fontWeight:500}}>{s.name}</td>
+                      <td style={{...TD,color:s.gender==="F"?"#f472b6":"#60a5fa"}}>{s.gender||"M"}</td>
+                      {subjects.map(sub=>{
+                        const v=s.marks[sub]; const sg=gradeOf(v);
+                        return <td key={sub} style={{...TD,color:gradeCol(sg),fontWeight:700}}>{v??"—"}</td>;
+                      })}
+                      <td style={{...TD,color:"#60a5fa",fontWeight:800}}>{s.total}</td>
+                      <td style={{...TD,color:"#a78bfa"}}>{(s.avg||0).toFixed(1)}</td>
+                      <td style={TD}><span style={{padding:"2px 8px",borderRadius:5,fontWeight:800,fontSize:12,
+                        background:gradeCol(g)+"22",color:gradeCol(g),border:`1px solid ${gradeCol(g)}44`}}>{g}</span></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        );
+      })()}
+
       {/* ── O/L ANALYSIS ── */}
       {viewMode==="ol_analysis"&&isOL&&(()=>{
         const hasSin  = olStudents.some(s=>s.sinMark!==undefined);
@@ -1092,6 +1237,16 @@ export default function ResultLedger({ db, user, state, setState }) {
         ];
         return(
         <div style={{padding:"18px 22px"}}>
+          <ExportBar
+            sectionId="ol-analysis-section"
+            csvRows={[
+              ["#","Name",hasSin?sinLbl:"",hasMath?mathLbl:"","Passed","Credits",hasSin?"Sin Pass":"",hasMath?"Math Pass":"","5+3C",hasSin&&hasMath?"6+SinMath":"","Status"].filter(Boolean),
+              ...olStudents.map((s,i)=>[i+1,s.name,hasSin?s.sinMark??"":undefined,hasMath?s.mathMark??"":undefined,s.passedCount,s.creditCount,hasSin?s.sinPass?"Y":"N":undefined,hasMath?s.mathPass?"Y":"N":undefined,s.pass5WithCredit3?"Y":"N",hasSin&&hasMath?s.pass6WithSinMath?"Y":"N":undefined,s.olStatus].filter(v=>v!==undefined))
+            ]}
+            filename={`OL-Analysis-Grade${selGrade}${selClass!=="All"?selClass:""}`}
+            label="O/L Analysis"
+          />
+          <div id="ol-analysis-section">
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:10,marginBottom:20}}>
             {statCards.map(c=>(
               <div key={c.label} style={{background:"#0f1e3d",borderRadius:10,padding:14,
@@ -1165,6 +1320,7 @@ export default function ResultLedger({ db, user, state, setState }) {
             </table>
           </div>
           )}
+        </div>{/* end ol-analysis-section */}
         </div>
         );
       })()}
@@ -1172,6 +1328,16 @@ export default function ResultLedger({ db, user, state, setState }) {
       {/* ── A/L ANALYSIS ── */}
       {viewMode==="al_analysis"&&isAL&&(
         <div style={{padding:"18px 22px"}}>
+          <ExportBar
+            sectionId="al-analysis-section"
+            csvRows={[
+              ["#","Name","Passes","Credits","Status",...subjects],
+              ...alStudents.map((s,i)=>[i+1,s.name,s.alPasses,s.alCredits,s.alStatus,...subjects.map(sub=>s.marks[sub]??"")])
+            ]}
+            filename={`AL-Analysis-Grade${selGrade}${selClass!=="All"?selClass:""}`}
+            label="A/L Analysis"
+          />
+          <div id="al-analysis-section">
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:10,marginBottom:20}}>
             {[
               {label:"3+ passes (qualify for university)",value:alCounts.qualify, color:"#22c55e",desc:"A/L Qualify"},
@@ -1233,6 +1399,7 @@ export default function ResultLedger({ db, user, state, setState }) {
             </table>
           </div>
           )}
+        </div>{/* end al-analysis-section */}
         </div>
       )}
     </div>

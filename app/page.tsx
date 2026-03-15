@@ -2621,13 +2621,7 @@ function AdminView({user,state,setState,onLogout,onBackToSite,isSA,db}:
 
       case "dashboard": return(
         <div className="space-y-6">
-          <div className="flex items-center justify-between flex-wrap gap-3">
-            <h2 className="text-xl font-bold text-white">Admin Dashboard</h2>
-            <button onClick={()=>exportAllClassesAnalysis(state, dashExam==="__term__"?undefined:dashExam)}
-              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm px-4 py-2 rounded-lg transition-colors shadow-lg shadow-emerald-500/20">
-              <Download size={14}/>Export All Classes Analysis
-            </button>
-          </div>
+          <h2 className="text-xl font-bold text-white">Admin Dashboard</h2>
 
           {/* ── Pending Approvals Banner ── */}
           {(()=>{
