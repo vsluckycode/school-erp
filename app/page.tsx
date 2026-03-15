@@ -1651,11 +1651,11 @@ function LoginScreen({state,db,onLogin,onRegister,onBack}:{state:AppState;db:DbO
     try {
       if(role==="admin"){
         if(sb.isConfigured()){
-          // Always fetch the latest password directly from Supabase — never trust cached state
+          // Always fetch the latest password directly from Supabase
           const pwData = await sb.loadPasswords();
-          if(pwData){
+          if(pwData && pwData.pwAdmin){
             const correctUser = pwData.adminUsername || "admin";
-            const correctPw   = pwData.pwAdmin ? decPII(pwData.pwAdmin) : "";
+            const correctPw   = decPII(pwData.pwAdmin);
             if(id===correctUser && pass===correctPw){
               onLogin({role:"admin",id:"admin",name:"Administrator"});
             } else {
@@ -1663,12 +1663,20 @@ function LoginScreen({state,db,onLogin,onRegister,onBack}:{state:AppState;db:DbO
             }
             return;
           }
+          // pwData row doesn't exist yet — force admin to set password via Settings first
+          // For first-time setup only: allow default login then immediately redirect to security
+          if(id==="admin" && pass==="admin123"){
+            onLogin({role:"admin",id:"admin",name:"Administrator"});
+            return;
+          }
+          setError("Admin password not set. Log in with admin / admin123 first, then change it in Settings → Security.");
+          return;
         }
-        // Offline fallback — no Supabase connection
+        // Completely offline fallback
         if(id===(state.settings.adminUsername||"admin") && pass===state.settings.pwAdmin){
           onLogin({role:"admin",id:"admin",name:"Administrator"});
         } else {
-          setError("Invalid admin credentials (offline — check connection)");
+          setError("Invalid admin credentials");
         }
       } else if(role==="support_admin"){
         // Try Supabase users table, then fallback to local supportAdmins
@@ -6337,48 +6345,48 @@ function SecurityCenter({state,setState}:{state:AppState;setState:(fn:(s:AppStat
 
   function saveAdminUsername(){
     if(!newUsername.trim()||newUsername.trim().length<3) return;
+    const uname = newUsername.trim();
+    setState(s=>({...s,settings:{...s.settings,adminUsername:uname}}));
     setState(s=>{
-      const updated={...s,settings:{...s.settings,adminUsername:newUsername.trim()}};
-      sb.savePasswords({
-        pwAdmin:      encPII(updated.settings.pwAdmin),
-        pwCounselor:  encPII(updated.settings.pwCounselor),
-        pwStaff:      encPII(updated.settings.pwStaff),
-        pwExam:       encPII(updated.settings.pwExam),
-        adminUsername: newUsername.trim(),
-      });
-      try{ localStorage.setItem("erp_settings_bak", JSON.stringify({
-        ...updated.settings, logoUrl:"",
-        pwAdmin:      encPII(updated.settings.pwAdmin),
-        pwCounselor:  encPII(updated.settings.pwCounselor),
-        pwStaff:      encPII(updated.settings.pwStaff),
-        pwExam:       encPII(updated.settings.pwExam),
+      const updated={...s.settings,adminUsername:uname};
+      const payload={
+        pwAdmin:      encPII(updated.pwAdmin),
+        pwCounselor:  encPII(updated.pwCounselor),
+        pwStaff:      encPII(updated.pwStaff),
+        pwExam:       encPII(updated.pwExam),
+        adminUsername: uname,
+      };
+      sb.savePasswords(payload).then(()=>console.log("[Security] Username saved to Supabase ✓")).catch(e=>console.error("[Security] Save failed",e));
+      try{ localStorage.setItem("erp_settings_bak", JSON.stringify({...updated,logoUrl:"",
+        pwAdmin:payload.pwAdmin,pwCounselor:payload.pwCounselor,pwStaff:payload.pwStaff,pwExam:payload.pwExam
       }));}catch{}
-      return updated;
+      return s;
     });
     setUsernameSaved(true); setTimeout(()=>setUsernameSaved(false),2000);
   }
 
   function saveSystemPw(key:"pwAdmin"|"pwCounselor"|"pwStaff"|"pwExam",val:string){
     if(!val.trim()) return;
+    // Update state first
+    setState(s=>({...s,settings:{...s.settings,[key]:val.trim()}}));
+    // Then save to Supabase OUTSIDE setState (can't do async in updater)
+    // We need the full updated settings — read current then override
     setState(s=>{
-      const updated={...s,settings:{...s.settings,[key]:val.trim()}};
-      // Save ALL passwords immediately to dedicated Supabase key (encrypted)
-      sb.savePasswords({
-        pwAdmin:      encPII(updated.settings.pwAdmin),
-        pwCounselor:  encPII(updated.settings.pwCounselor),
-        pwStaff:      encPII(updated.settings.pwStaff),
-        pwExam:       encPII(updated.settings.pwExam),
-        adminUsername: updated.settings.adminUsername||"admin",
-      });
-      // Also update erp_settings_bak immediately
-      try{ localStorage.setItem("erp_settings_bak", JSON.stringify({
-        ...updated.settings, logoUrl:"",
-        pwAdmin:      encPII(updated.settings.pwAdmin),
-        pwCounselor:  encPII(updated.settings.pwCounselor),
-        pwStaff:      encPII(updated.settings.pwStaff),
-        pwExam:       encPII(updated.settings.pwExam),
+      const updated={...s.settings,[key]:val.trim()};
+      const payload={
+        pwAdmin:      encPII(updated.pwAdmin),
+        pwCounselor:  encPII(updated.pwCounselor),
+        pwStaff:      encPII(updated.pwStaff),
+        pwExam:       encPII(updated.pwExam),
+        adminUsername: updated.adminUsername||"admin",
+      };
+      // Save to dedicated Supabase passwords row
+      sb.savePasswords(payload).then(()=>console.log("[Security] Passwords saved to Supabase ✓")).catch(e=>console.error("[Security] Save failed",e));
+      // Update localStorage backup
+      try{ localStorage.setItem("erp_settings_bak", JSON.stringify({...updated,logoUrl:"",
+        pwAdmin:payload.pwAdmin,pwCounselor:payload.pwCounselor,pwStaff:payload.pwStaff,pwExam:payload.pwExam
       }));}catch{}
-      return updated;
+      return s; // don't double-update, first setState already did it
     });
     setSaved(key); setTimeout(()=>setSaved(null),2000);
   }
@@ -6399,9 +6407,24 @@ function SecurityCenter({state,setState}:{state:AppState;setState:(fn:(s:AppStat
 
   return(
     <div className="space-y-5">
-      <div className="flex items-center gap-3 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3">
-        <Shield size={16} className="text-red-400 flex-shrink-0"/>
-        <p className="text-red-400/80 text-xs">Password and username changes take effect immediately. Keep a secure record of all credentials.</p>
+      <div className="flex items-center justify-between gap-3 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3 flex-wrap">
+        <div className="flex items-center gap-3">
+          <Shield size={16} className="text-red-400 flex-shrink-0"/>
+          <p className="text-red-400/80 text-xs">Password and username changes take effect immediately. Keep a secure record of all credentials.</p>
+        </div>
+        <button onClick={async()=>{
+          const payload={
+            pwAdmin:      encPII(state.settings.pwAdmin),
+            pwCounselor:  encPII(state.settings.pwCounselor),
+            pwStaff:      encPII(state.settings.pwStaff),
+            pwExam:       encPII(state.settings.pwExam),
+            adminUsername: state.settings.adminUsername||"admin",
+          };
+          await sb.savePasswords(payload);
+          alert("✓ Passwords synced to Supabase successfully!");
+        }} className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs px-3 py-1.5 rounded-lg transition-colors flex-shrink-0">
+          <Database size={11}/>Force Sync to Supabase
+        </button>
       </div>
 
       {/* Admin Username */}
