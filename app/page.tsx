@@ -178,6 +178,30 @@ const sb = {
       return arr[0]?.data ?? null;
     } catch { return null; }
   },
+
+  // Dedicated password storage — separate from main config to avoid overwrite races
+  async savePasswords(data: object): Promise<void> {
+    if (!this.isConfigured()) return;
+    try {
+      const h = { ...this.headers(), "Prefer": "resolution=merge-duplicates" } as HeadersInit;
+      await fetch(`${SUPABASE_URL}/rest/v1/app_config`, {
+        method: "POST", headers: h,
+        body: JSON.stringify({ id: "admin_passwords", data }),
+      });
+    } catch (e) { console.warn("[sb.savePasswords]", e); }
+  },
+
+  async loadPasswords(): Promise<any | null> {
+    if (!this.isConfigured()) return null;
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/app_config?id=eq.admin_passwords`, {
+        headers: this.headers() as HeadersInit,
+      });
+      if (!res.ok) return null;
+      const arr = await res.json();
+      return arr[0]?.data ?? null;
+    } catch { return null; }
+  },
 };
 
 // ─── DB Operations Interface (passed as prop) ─────────────────────────────────
@@ -6307,13 +6331,49 @@ function SecurityCenter({state,setState}:{state:AppState;setState:(fn:(s:AppStat
 
   function saveAdminUsername(){
     if(!newUsername.trim()||newUsername.trim().length<3) return;
-    setState(s=>({...s,settings:{...s.settings,adminUsername:newUsername.trim()}}));
+    setState(s=>{
+      const updated={...s,settings:{...s.settings,adminUsername:newUsername.trim()}};
+      sb.savePasswords({
+        pwAdmin:      encPII(updated.settings.pwAdmin),
+        pwCounselor:  encPII(updated.settings.pwCounselor),
+        pwStaff:      encPII(updated.settings.pwStaff),
+        pwExam:       encPII(updated.settings.pwExam),
+        adminUsername: newUsername.trim(),
+      });
+      try{ localStorage.setItem("erp_settings_bak", JSON.stringify({
+        ...updated.settings, logoUrl:"",
+        pwAdmin:      encPII(updated.settings.pwAdmin),
+        pwCounselor:  encPII(updated.settings.pwCounselor),
+        pwStaff:      encPII(updated.settings.pwStaff),
+        pwExam:       encPII(updated.settings.pwExam),
+      }));}catch{}
+      return updated;
+    });
     setUsernameSaved(true); setTimeout(()=>setUsernameSaved(false),2000);
   }
 
   function saveSystemPw(key:"pwAdmin"|"pwCounselor"|"pwStaff"|"pwExam",val:string){
     if(!val.trim()) return;
-    setState(s=>({...s,settings:{...s.settings,[key]:val.trim()}}));
+    setState(s=>{
+      const updated={...s,settings:{...s.settings,[key]:val.trim()}};
+      // Save ALL passwords immediately to dedicated Supabase key (encrypted)
+      sb.savePasswords({
+        pwAdmin:      encPII(updated.settings.pwAdmin),
+        pwCounselor:  encPII(updated.settings.pwCounselor),
+        pwStaff:      encPII(updated.settings.pwStaff),
+        pwExam:       encPII(updated.settings.pwExam),
+        adminUsername: updated.settings.adminUsername||"admin",
+      });
+      // Also update erp_settings_bak immediately
+      try{ localStorage.setItem("erp_settings_bak", JSON.stringify({
+        ...updated.settings, logoUrl:"",
+        pwAdmin:      encPII(updated.settings.pwAdmin),
+        pwCounselor:  encPII(updated.settings.pwCounselor),
+        pwStaff:      encPII(updated.settings.pwStaff),
+        pwExam:       encPII(updated.settings.pwExam),
+      }));}catch{}
+      return updated;
+    });
     setSaved(key); setTimeout(()=>setSaved(null),2000);
   }
 
@@ -8361,7 +8421,8 @@ export default function SchoolERP() {
       sb.select<any>("counseling_profiles"),
       sb.loadConfig(),
       sb.loadCms(),
-    ]).then(([students, teachers, items, labs, fees, behavior, counseling, config, cmsDb]) => {
+      sb.loadPasswords(),
+    ]).then(([students, teachers, items, labs, fees, behavior, counseling, config, cmsDb, pwData]) => {
       update(prev => ({
         ...prev,
         subjects:    config?.subjects  ?? prev.subjects,
@@ -8371,16 +8432,18 @@ export default function SchoolERP() {
         examRecords: config?.examRecords ?? prev.examRecords,
         // Protect sensitive/local-only fields from Supabase overwrite
         settings:  config?.settings  ? (()=>{
+          // pwData (admin_passwords key) takes HIGHEST priority — it's the dedicated password store
+          const pw = pwData || config.settings;
           const merged = {
             ...prev.settings,
             ...config.settings,
-            logoUrl:       prev.settings.logoUrl,  // logo is local-only (stripped from config)
-            // Decrypt passwords from Supabase — fall back to local if not in DB yet
-            pwAdmin:      config.settings.pwAdmin      ? decPII(config.settings.pwAdmin)      : prev.settings.pwAdmin,
-            pwCounselor:  config.settings.pwCounselor  ? decPII(config.settings.pwCounselor)  : prev.settings.pwCounselor,
-            pwStaff:      config.settings.pwStaff      ? decPII(config.settings.pwStaff)      : prev.settings.pwStaff,
-            pwExam:       config.settings.pwExam       ? decPII(config.settings.pwExam)       : prev.settings.pwExam,
-            adminUsername: config.settings.adminUsername || prev.settings.adminUsername || "admin",
+            logoUrl:       prev.settings.logoUrl,  // logo is local-only
+            // Use pwData first (dedicated), then config.settings, then prev (local fallback)
+            pwAdmin:      pw.pwAdmin      ? decPII(pw.pwAdmin)      : prev.settings.pwAdmin,
+            pwCounselor:  pw.pwCounselor  ? decPII(pw.pwCounselor)  : prev.settings.pwCounselor,
+            pwStaff:      pw.pwStaff      ? decPII(pw.pwStaff)      : prev.settings.pwStaff,
+            pwExam:       pw.pwExam       ? decPII(pw.pwExam)       : prev.settings.pwExam,
+            adminUsername: pw.adminUsername || config.settings.adminUsername || prev.settings.adminUsername || "admin",
           };
           // Update erp_settings_bak with freshly decrypted passwords from Supabase
           try{ localStorage.setItem("erp_settings_bak", JSON.stringify({
