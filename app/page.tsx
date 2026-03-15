@@ -8250,19 +8250,17 @@ export default function SchoolERP() {
           pwExam:      encPII(next.settings.pwExam),
         }));
       } catch {}
-      // 3. Full state — strip base64 logo + keep media (media with base64 saved separately)
+      // 3. Full state — strip base64 logo + passwords from main state key
       try {
-        const toSave = {
-        const BLANK_PW = ""; // never store plain passwords in main state key
         const toSave = {
           ...next,
           settings: {
             ...next.settings,
             logoUrl:     next.settings.logoUrl?.startsWith("data:") ? "" : (next.settings.logoUrl || ""),
-            pwAdmin:     BLANK_PW,
-            pwCounselor: BLANK_PW,
-            pwStaff:     BLANK_PW,
-            pwExam:      BLANK_PW,
+            pwAdmin:     "",
+            pwCounselor: "",
+            pwStaff:     "",
+            pwExam:      "",
           },
         };
         localStorage.setItem(STATE_KEY, JSON.stringify(toSave));
