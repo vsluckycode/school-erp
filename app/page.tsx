@@ -371,7 +371,7 @@ const saveLogo = (url: string) => {
 const BLOOD_GROUPS = ["A+","A-","B+","B-","AB+","AB-","O+","O-"];
 
 const INITIAL: AppState = {
-  settings: { name:"Bakamuna Mahasen National School", tagline:"Excellence in Education", logoUrl:getSavedLogo(), blogUrl:"https://bakamuna.edu.lk/blog", currency:"LKR", pwAdmin:"admin123", pwCounselor:"couns789", pwStaff:"staff456", pwExam:"exam123", siteTitle:"Bakamuna Mahasen National School", adminUsername:"admin" },
+  settings: { name:"Bakamuna Mahasen National School", tagline:"Excellence in Education", logoUrl:getSavedLogo(), blogUrl:"https://bakamuna.edu.lk/blog", currency:"LKR", pwAdmin:"changeme_set_in_settings", pwCounselor:"couns789", pwStaff:"staff456", pwExam:"exam123", siteTitle:"Bakamuna Mahasen National School", adminUsername:"admin" },
   classes: [
     { id:"c1", name:"9",  section:"A", teacherId:"t1" },
     { id:"c2", name:"10", section:"B", teacherId:"t2" },
@@ -1650,19 +1650,25 @@ function LoginScreen({state,db,onLogin,onRegister,onBack}:{state:AppState;db:DbO
     setError(""); setLoad(true);
     try {
       if(role==="admin"){
-        // 1. Try Supabase users table first
         if(sb.isConfigured()){
-          const rows = await sb.select<any>("users", `username=eq.${encodeURIComponent(id)}&role=eq.admin`);
-          if(rows.length && rows[0].password_hash === pass){
-            onLogin({role:"admin",id:"admin",name:rows[0].display_name||"Administrator"});
+          // Always fetch the latest password directly from Supabase — never trust cached state
+          const pwData = await sb.loadPasswords();
+          if(pwData){
+            const correctUser = pwData.adminUsername || "admin";
+            const correctPw   = pwData.pwAdmin ? decPII(pwData.pwAdmin) : "";
+            if(id===correctUser && pass===correctPw){
+              onLogin({role:"admin",id:"admin",name:"Administrator"});
+            } else {
+              setError("Invalid admin credentials");
+            }
             return;
           }
         }
-        // 2. Fallback: master admin (username + password from settings)
-        if(id===state.settings.adminUsername && pass===state.settings.pwAdmin){
+        // Offline fallback — no Supabase connection
+        if(id===(state.settings.adminUsername||"admin") && pass===state.settings.pwAdmin){
           onLogin({role:"admin",id:"admin",name:"Administrator"});
         } else {
-          setError("Invalid admin credentials");
+          setError("Invalid admin credentials (offline — check connection)");
         }
       } else if(role==="support_admin"){
         // Try Supabase users table, then fallback to local supportAdmins
